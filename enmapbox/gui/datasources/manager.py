@@ -33,6 +33,7 @@ from .metadata import RasterBandTreeNode
 from ..dataviews.docks import Dock
 from ..mapcanvas import MapCanvas
 from ..mimedata import extractMapLayers, fromDataSourceList, MDF_URILIST, QGIS_URILIST_MIMETYPE
+from ...qgispluginsupport.qps.projectlayers import SelectProjectLayersDialog
 from ...qgispluginsupport.qps.speclib.core import is_spectral_library
 from ...qgispluginsupport.qps.subdatasets import SubDatasetSelectionDialog, subLayerDetails
 
@@ -708,7 +709,15 @@ class DataSourceManagerPanelUI(QgsDockWidget):
 
     def onSyncToQGIS(self, *args):
         if isinstance(self.mDataSourceManager, DataSourceManager):
-            self.mDataSourceManager.importQGISLayers()
+            dialog = SelectProjectLayersDialog(project=QgsProject.instance())
+            if dialog.exec_() == QDialog.Accepted:
+                layers = dialog.selectedLayers()
+                layers = [lyr for lyr in layers if not lyr.dataProvider().name() == 'memory']
+
+                if len(layers) > 0:
+                    self.mDataSourceManager.addSources(layers)
+
+            # self.mDataSourceManager.importQGISLayers()
 
     def updateActions(self):
 
