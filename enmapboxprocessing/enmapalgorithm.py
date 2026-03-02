@@ -295,7 +295,7 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
 
     def parameterAsEnum(self, parameters: Dict[str, Any], name: str, context: QgsProcessingContext) -> Optional[int]:
         if name not in parameters:
-            return None
+            return self.parameterDefinition(name).defaultValue()
         return super().parameterAsEnum(parameters, name, context)
 
     def parameterAsEnums(self, parameters: Dict[str, Any], name: str, context: QgsProcessingContext) -> List[int]:
