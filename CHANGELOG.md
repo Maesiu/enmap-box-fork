@@ -11,6 +11,9 @@ _This release was tested under QGIS 3.40 (LTR) and 3.44 (latest release)._
 * revisited start of processing algorithms
 * if started from EnMAP-Box, the results returned from QGIS Processing Algorithms are
   added directly to the EnMAP-Box, keeping the QGIS Project clean
+* a new dialog allows selecting layers from the main QGIS to be added as data
+  sources ([#1487](https://github.com/EnMAP-Box/enmap-box/pull/1487))
+* added support for vector tile layers ([#860](https://github.com/EnMAP-Box/enmap-box/issues/860))
 
 #### Spectral Library Viewer
 
@@ -23,11 +26,13 @@ have been completely redesigned (qps issues [100](https://github.com/EnMAP-Box/q
 * added interactive legend that allows hiding / showing single profiles
 * added profile statistics, e.g. mean and stddev profiles
 * import and export of spectral profiles has been completely revised and
-  is now implemented as QGIS Processing Algorithms (see below) 
+  is now implemented as QGIS Processing Algorithms (see below)
 * supports import of ECOSTRESS data
-* new "Data" field allows modifying x and y values, e.g., to scale profile values [#1459](https://github.com/EnMAP-Box/enmap-box/issues/1459)
+* new "Data" field allows modifying x and y values, e.g., to scale profile
+  values [#1459](https://github.com/EnMAP-Box/enmap-box/issues/1459)
 * fixed several visual glitches in the plot settings and profile source trees (text colors, sizes)
-* Attribute table, form view: JSON viewer shows list values in one line, fixed saving and loading of changed profile data
+* Attribute table, form view: JSON viewer shows list values in one line, fixed saving and loading of changed profile
+  data
 
 #### Applications
 
