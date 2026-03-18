@@ -725,7 +725,10 @@ class DockManager(QObject):
             return True
         return False
 
-    def createDock(self, dockType: Union[str, type, Any], *args, cls=None, position='bottom', relativeTo=None,
+    def createDock(self, dockType: Union[str, type, Any], *args,
+                   cls=None,
+                   position='right',
+                   relativeTo=None,
                    **kwds) -> Dock:
         """
         Creates and returns a new Dock
@@ -1111,6 +1114,12 @@ class DockManagerTreeModel(QgsLayerTreeModel):
     def removeNodes(self, nodes: List[QgsLayerTreeNode]):
         for n in nodes:
             if isinstance(n, QgsLayerTreeNode) and isinstance(n.parent(), QgsLayerTreeNode):
+                if isinstance(n, SpeclibProfileVisualizationGroupNode):
+                    vis = n.vis()
+                    if isinstance(vis, ProfileVisualizationGroup):
+                        slw = n.parent().speclibWidget()
+                        slw.plotModel().removePropertyItemGroups([vis])
+
                 n.parent().takeChild(n)
                 n.setParent(None)
 
