@@ -23,6 +23,17 @@ import re
 from math import ceil
 from typing import List, Optional
 
+from enmapbox.gui import SpectralLibraryWidget
+from enmapbox.gui.mapcanvas import MapCanvas, CanvasLink
+from enmapbox.gui.mimedata import extractMapLayers
+from enmapbox.gui.utils import enmapboxUiPath
+from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea import DockArea as pgDockArea
+from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea.Dock import Dock as pgDock
+from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea.Dock import DockLabel as pgDockLabel
+from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea.DockArea import TempAreaWindow
+from enmapbox.qgispluginsupport.qps.speclib.core.spectrallibrary import SpectralLibraryUtils
+from enmapbox.qgispluginsupport.qps.utils import loadUi
+from enmapboxprocessing.utils import Utils
 from qgis.PyQt import QtCore
 from qgis.PyQt.QtCore import pyqtSignal, QSettings, Qt, QMimeData, QPoint, QUrl, QObject, QSize, QByteArray, QMetaType
 from qgis.PyQt.QtGui import QIcon, QDragEnterEvent, QDragMoveEvent, QDragLeaveEvent, QDropEvent, QResizeEvent, \
@@ -32,17 +43,7 @@ from qgis.PyQt.QtWidgets import QToolButton, QMenu, QMainWindow, QFileDialog, QW
 from qgis.core import QgsCoordinateReferenceSystem, QgsMapLayer, QgsProject, edit, QgsField, QgsLayerTree, \
     QgsLayerTreeLayer, QgsVectorLayer
 from qgis.gui import QgsMapCanvas
-
-from enmapbox.gui import SpectralLibraryWidget
-from enmapbox.gui.mapcanvas import MapCanvas, CanvasLink
-from enmapbox.gui.utils import enmapboxUiPath
-from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea import DockArea as pgDockArea
-from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea.Dock import Dock as pgDock
-from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea.Dock import DockLabel as pgDockLabel
-from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea.DockArea import TempAreaWindow
-from enmapbox.qgispluginsupport.qps.speclib.core.spectrallibrary import SpectralLibraryUtils
-from enmapbox.qgispluginsupport.qps.utils import loadUi
-from enmapboxprocessing.utils import Utils
+from qps.speclib.core import profile_fields
 
 RX_HTML_FILE = re.compile(r'\.(html|html|xhtml)$', re.I)
 
@@ -804,7 +805,7 @@ class SpectralLibraryDock(Dock):
                  project: Optional[QgsProject] = None,
                  **kwds):
         super(SpectralLibraryDock, self).__init__(*args, **kwds)
-
+        self.setAcceptDrops(True)
         self.mSpeclibWidget: SpectralLibraryWidget = SpectralLibraryWidget(speclib=speclib,
                                                                            project=project)
         self.mSpeclibWidget.setDelegateOpenRequests(True)
@@ -823,6 +824,32 @@ class SpectralLibraryDock(Dock):
         self.mDefaultSpeclibId: str = ''
         if isinstance(speclib, QgsVectorLayer):
             self.mDefaultSpeclibId = speclib.id()
+
+    # forward to EnMAPBox
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        event.setAccepted(True)
+
+    # forward to EnMAPBox
+    def dragMoveEvent(self, event):
+
+        pass
+
+    # forward to EnMAPBox
+    def dragLeaveEvent(self, event):
+
+        pass
+
+    # forward to EnMAPBox
+    def dropEvent(self, event):
+
+        md = event.mimeData()
+        slw = self.speclibWidget()
+        layers = extractMapLayers(md, project=slw.project())
+        speclibs = [lyr for lyr in layers if SpectralLibraryUtils.isSpectralLibrary(lyr)]
+        slw.project().addMapLayers(speclibs)
+        for speclib in speclibs:
+            for pfield in profile_fields(speclib):
+                slw.createProfileVisualization(speclib, pfield)
 
     def createDefaultSpeclib(self) -> QgsVectorLayer:
         """
