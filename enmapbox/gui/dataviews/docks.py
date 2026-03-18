@@ -23,6 +23,16 @@ import re
 from math import ceil
 from typing import List, Optional
 
+from qgis.PyQt import QtCore
+from qgis.PyQt.QtCore import pyqtSignal, QSettings, Qt, QMimeData, QPoint, QUrl, QObject, QSize, QByteArray, QMetaType
+from qgis.PyQt.QtGui import QIcon, QDragEnterEvent, QDragMoveEvent, QDragLeaveEvent, QDropEvent, QResizeEvent, \
+    QContextMenuEvent, QTextCursor
+from qgis.PyQt.QtWidgets import QToolButton, QMenu, QMainWindow, QFileDialog, QWidget, QMessageBox, QWidgetItem, \
+    QApplication, QStyle, QProgressBar, QTextEdit
+from qgis.core import QgsCoordinateReferenceSystem, QgsMapLayer, QgsProject, edit, QgsField, QgsLayerTree, \
+    QgsLayerTreeLayer, QgsVectorLayer
+from qgis.gui import QgsMapCanvas
+
 from enmapbox.gui import SpectralLibraryWidget
 from enmapbox.gui.mapcanvas import MapCanvas, CanvasLink
 from enmapbox.gui.utils import enmapboxUiPath
@@ -33,15 +43,6 @@ from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea.DockArea import
 from enmapbox.qgispluginsupport.qps.speclib.core.spectrallibrary import SpectralLibraryUtils
 from enmapbox.qgispluginsupport.qps.utils import loadUi
 from enmapboxprocessing.utils import Utils
-from qgis.PyQt import QtCore
-from qgis.PyQt.QtCore import pyqtSignal, QSettings, Qt, QMimeData, QPoint, QUrl, QObject, QSize, QByteArray, QMetaType
-from qgis.PyQt.QtGui import QIcon, QDragEnterEvent, QDragMoveEvent, QDragLeaveEvent, QDropEvent, QResizeEvent, \
-    QContextMenuEvent, QTextCursor
-from qgis.PyQt.QtWidgets import QToolButton, QMenu, QMainWindow, QFileDialog, QWidget, QMessageBox, QWidgetItem, \
-    QApplication, QStyle, QProgressBar, QTextEdit
-from qgis.core import QgsCoordinateReferenceSystem, QgsMapLayer, QgsProject, edit, QgsField, QgsLayerTree, \
-    QgsLayerTreeLayer, QgsVectorLayer
-from qgis.gui import QgsMapCanvas
 
 RX_HTML_FILE = re.compile(r'\.(html|html|xhtml)$', re.I)
 
@@ -927,7 +928,7 @@ class MapDock(Dock):
         self.mBaseName = self.title()
 
         from enmapbox.gui.mapcanvas import MapCanvas
-        self.mCanvas: MapCanvas = MapCanvas(self)
+        self.mCanvas: MapCanvas = MapCanvas()
         self.mCanvas.setWindowTitle(self.title())
         self.mCanvas.sigNameChanged.connect(self.setTitle)
         self.mCanvas.sigCrsChanged.connect(self.sigCrsChanged.emit)

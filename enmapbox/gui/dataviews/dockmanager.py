@@ -725,7 +725,10 @@ class DockManager(QObject):
             return True
         return False
 
-    def createDock(self, dockType: Union[str, type, Any], *args, cls=None, position='bottom', relativeTo=None,
+    def createDock(self, dockType: Union[str, type, Any], *args,
+                   cls=None,
+                   position='right',
+                   relativeTo=None,
                    **kwds) -> Dock:
         """
         Creates and returns a new Dock
