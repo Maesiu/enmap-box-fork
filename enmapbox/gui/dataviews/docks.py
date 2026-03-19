@@ -25,11 +25,13 @@ from typing import List, Optional
 
 from enmapbox.gui import SpectralLibraryWidget
 from enmapbox.gui.mapcanvas import MapCanvas, CanvasLink
+from enmapbox.gui.mimedata import extractMapLayers
 from enmapbox.gui.utils import enmapboxUiPath
 from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea import DockArea as pgDockArea
 from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea.Dock import Dock as pgDock
 from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea.Dock import DockLabel as pgDockLabel
 from enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph.dockarea.DockArea import TempAreaWindow
+from enmapbox.qgispluginsupport.qps.speclib.core import profile_fields
 from enmapbox.qgispluginsupport.qps.speclib.core.spectrallibrary import SpectralLibraryUtils
 from enmapbox.qgispluginsupport.qps.utils import loadUi
 from enmapboxprocessing.utils import Utils
@@ -803,7 +805,7 @@ class SpectralLibraryDock(Dock):
                  project: Optional[QgsProject] = None,
                  **kwds):
         super(SpectralLibraryDock, self).__init__(*args, **kwds)
-
+        self.setAcceptDrops(True)
         self.mSpeclibWidget: SpectralLibraryWidget = SpectralLibraryWidget(speclib=speclib,
                                                                            project=project)
         self.mSpeclibWidget.setDelegateOpenRequests(True)
@@ -822,6 +824,32 @@ class SpectralLibraryDock(Dock):
         self.mDefaultSpeclibId: str = ''
         if isinstance(speclib, QgsVectorLayer):
             self.mDefaultSpeclibId = speclib.id()
+
+    # forward to EnMAPBox
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        event.setAccepted(True)
+
+    # forward to EnMAPBox
+    def dragMoveEvent(self, event):
+
+        pass
+
+    # forward to EnMAPBox
+    def dragLeaveEvent(self, event):
+
+        pass
+
+    # forward to EnMAPBox
+    def dropEvent(self, event):
+
+        md = event.mimeData()
+        slw = self.speclibWidget()
+        layers = extractMapLayers(md, project=slw.project())
+        speclibs = [lyr for lyr in layers if SpectralLibraryUtils.isSpectralLibrary(lyr)]
+        slw.project().addMapLayers(speclibs)
+        for speclib in speclibs:
+            for pfield in profile_fields(speclib):
+                slw.createProfileVisualization(speclib, pfield)
 
     def createDefaultSpeclib(self) -> QgsVectorLayer:
         """
@@ -927,7 +955,7 @@ class MapDock(Dock):
         self.mBaseName = self.title()
 
         from enmapbox.gui.mapcanvas import MapCanvas
-        self.mCanvas: MapCanvas = MapCanvas(self)
+        self.mCanvas: MapCanvas = MapCanvas()
         self.mCanvas.setWindowTitle(self.title())
         self.mCanvas.sigNameChanged.connect(self.setTitle)
         self.mCanvas.sigCrsChanged.connect(self.sigCrsChanged.emit)

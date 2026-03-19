@@ -33,6 +33,8 @@ have been completely redesigned (qps issues [100](https://github.com/EnMAP-Box/q
 * fixed several visual glitches in the plot settings and profile source trees (text colors, sizes)
 * Attribute table, form view: JSON viewer shows list values in one line, fixed saving and loading of changed profile
   data
+* vector sources can be dropped from data source pane onto the spectral library
+  viewer [#1501](https://github.com/EnMAP-Box/enmap-box/issues/1501)
 
 #### Applications
 
@@ -157,6 +159,10 @@ have been completely redesigned (qps issues [100](https://github.com/EnMAP-Box/q
   image [#1383](https://github.com/EnMAP-Box/enmap-box/issues/1383)
 * [Spectral View] export spectral profiles uses current speclib and field
   as default input [#1401](https://github.com/EnMAP-Box/enmap-box/issues/1401)
+* [Spectral View] profile candidates get also shown when selected-features-only mode is activated
+* Vector layer properties dialag: activated the button to start / stop the editing
+  mode [#1489](https://github.com/EnMAP-Box/enmap-box/issues/1489)
+* fixed a bug that occured on Linux native installations on moving of map views
 
 </details>
 
