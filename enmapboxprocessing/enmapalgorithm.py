@@ -8,21 +8,8 @@ from typing import Any, Dict, Iterable, List, Optional, TextIO, Tuple
 
 import numpy as np
 from osgeo import gdal
-import processing
-from qgis.PyQt.QtCore import QVariant
-from qgis.PyQt.QtGui import QIcon
-from qgis.core import (Qgis, QgsCategorizedSymbolRenderer, QgsCoordinateReferenceSystem, QgsMapLayer,
-                       QgsPalettedRasterRenderer, QgsProcessing, QgsProcessingAlgorithm, QgsProcessingContext,
-                       QgsProcessingException, QgsProcessingFeedback, QgsProcessingOutputLayerDefinition,
-                       QgsProcessingParameterBand, QgsProcessingParameterBoolean, QgsProcessingParameterCrs,
-                       QgsProcessingParameterDefinition, QgsProcessingParameterEnum, QgsProcessingParameterExtent,
-                       QgsProcessingParameterField, QgsProcessingParameterFile, QgsProcessingParameterFileDestination,
-                       QgsProcessingParameterFolderDestination, QgsProcessingParameterMapLayer,
-                       QgsProcessingParameterMatrix, QgsProcessingParameterMultipleLayers, QgsProcessingParameterNumber,
-                       QgsProcessingParameterRange, QgsProcessingParameterRasterLayer, QgsProcessingParameterString,
-                       QgsProcessingParameterVectorDestination, QgsProcessingParameterVectorLayer, QgsProcessingUtils,
-                       QgsProject, QgsProperty, QgsRasterLayer, QgsRectangle, QgsVectorLayer)
 
+import processing
 from enmapbox.typeguard import typechecked
 from enmapboxprocessing.driver import Driver
 from enmapboxprocessing.glossary import injectGlossaryLinks
@@ -31,6 +18,22 @@ from enmapboxprocessing.processingfeedback import ProcessingFeedback
 from enmapboxprocessing.typing import ClassifierDump, ClustererDump, CreationOptions, GdalResamplingAlgorithm, \
     RegressorDump, TransformerDump
 from enmapboxprocessing.utils import Utils
+from qgis.PyQt.QtCore import QDateTime, QDate
+from qgis.PyQt.QtGui import QTextDocument, QIcon
+from qgis.PyQt.QtWidgets import QApplication
+from qgis.core import NULL
+from qgis.core import (Qgis, QgsCategorizedSymbolRenderer, QgsCoordinateReferenceSystem, QgsMapLayer,
+                       QgsPalettedRasterRenderer, QgsProcessingAlgorithm, QgsProcessingContext,
+                       QgsProcessingException, QgsProcessingFeedback, QgsProcessingOutputLayerDefinition,
+                       QgsProcessingParameterBand, QgsProcessingParameterBoolean, QgsProcessingParameterCrs,
+                       QgsProcessingParameterDefinition, QgsProcessingParameterEnum, QgsProcessingParameterExtent,
+                       QgsProcessingParameterField, QgsProcessingParameterFile, QgsProcessingParameterFileDestination,
+                       QgsProcessingParameterFolderDestination, QgsProcessingParameterMapLayer,
+                       QgsProcessingParameterMatrix, QgsProcessingParameterMultipleLayers, QgsProcessingParameterNumber,
+                       QgsProcessingParameterRange, QgsProcessingParameterRasterLayer, QgsProcessingParameterString,
+                       QgsProcessingParameterVectorDestination, QgsProcessingParameterVectorLayer, QgsProcessingUtils,
+                       QgsProject, QgsProperty, QgsRasterLayer, QgsRectangle, QgsVectorLayer,
+                       QgsProcessingParameterDateTime, QgsProcessing)
 
 
 class AlgorithmCanceledException(Exception):
@@ -51,12 +54,13 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
     JsonFileFilter = 'JSON files (*.json)'
     JsonFileExtension = 'json'
     JsonFileDestination = 'JSON file destination.'
-    GeoJsonFileFilter = 'GEOJSON files (*.geojson)'
+    GeoJsonFileFilter = 'GeoJSON files (*.geojson)'
     GeoJsonFileExtension = 'geojson'
-    GeoJsonFileDestination = 'GEOJSON file destination.'
+    GeoJsonFileDestination = 'GeoJSON file destination.'
     GpkgFileFilter = 'GeoPackage files (*.gpkg)'
     GpkgFileExtension = 'gpkg'
     GpkgFileDestination = 'GeoPackage file destination.'
+    SpeclibFileFilter = GeoJsonFileFilter + ';;' + GpkgFileFilter
     CsvFileFilter = 'CSV files (*.csv)'
     CsvFileExtension = 'cvs'
     CsvFileDestination = 'CSV file destination.'
@@ -69,6 +73,7 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
     ReportFileDestination = 'Report file destination.'
     ReportOpen = 'Whether to open the output report in the web browser.'
     FolderDestination = 'Folder destination.'
+    DataCubeDestination = 'Data cube destination.'
     VrtFormat = Driver.VrtFormat
     DefaultVrtCreationOptions = Driver.DefaultVrtCreationOptions
     DefaultVrtCreationProfile = VrtFormat + ' ' + ' '.join(DefaultVrtCreationOptions)
@@ -96,10 +101,10 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
         for c in '!?-+/*()[]{}':
             nameId = nameId.replace(c, '')
         nameId = ''.join([s.title() for s in nameId.split(' ')])
-        return nameId
+        return nameId.lower()
 
     def groupId(self) -> str:
-        return self._generateId(self.group())
+        return self._generateId(self.group()).lower()
 
     def name(self) -> str:
         return self._generateId(self.displayName())
@@ -191,7 +196,7 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
         # convert temporary scratch layer to OGR layer
         if layer.dataProvider().name() == 'memory' and convertFromMemoryToOgr:
             renderer = layer.renderer().clone()
-            parameters = {'INPUT': layer, 'OUTPUT': 'TEMPORARY_OUTPUT'}
+            parameters = {'INPUT': layer, 'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT}
             feedback = None
             result = self.runAlg('native:savefeatures', parameters, None, feedback, context, True)
             layer = QgsVectorLayer(result['OUTPUT'], layer.name())
@@ -289,7 +294,9 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
         dump = ClustererDump.fromDict(dump)
         return dump
 
-    def parameterAsEnum(self, parameters: Dict[str, Any], name: str, context: QgsProcessingContext) -> int:
+    def parameterAsEnum(self, parameters: Dict[str, Any], name: str, context: QgsProcessingContext) -> Optional[int]:
+        if name not in parameters:
+            return self.parameterDefinition(name).defaultValue()
         return super().parameterAsEnum(parameters, name, context)
 
     def parameterAsEnums(self, parameters: Dict[str, Any], name: str, context: QgsProcessingContext) -> List[int]:
@@ -536,9 +543,15 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
     def parameterAsMatrix(
             self, parameters: Dict[str, Any], name: str, context: QgsProcessingContext
     ) -> Optional[List[Any]]:
+
         value = parameters.get(name)
-        if value == [QVariant()]:
-            return None
+
+        if value is None:
+            value = super().parameterAsMatrix(parameters, name, context)
+
+        if value == [NULL]:
+            value = None
+
         return value
 
     def parameterIsNone(self, parameters: Dict[str, Any], name: str):
@@ -632,7 +645,12 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
         return None
 
     def shortHelpString(self):
-        text = '<p>' + injectGlossaryLinks(self.shortDescription()) + '</p>'
+        headless = 'help' in QApplication.instance().arguments()
+
+        text = ''
+        if not headless:
+            text += '<p>' + injectGlossaryLinks(self.shortDescription()) + '</p>'
+
         if self.helpHeader() is not None:
             title, text2 = self.helpHeader()
             text += f' <i><h3>{title}</h3> </i><p>{injectGlossaryLinks(text2)}</p>'
@@ -640,6 +658,12 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
             if text2 == '':
                 continue
             text += f'<h3>{name}</h3><p>{injectGlossaryLinks(text2)}</p>'
+
+        if headless:  # convert to plain text (see https://github.com/EnMAP-Box/enmap-box/issues/1348)
+            doc = QTextDocument()
+            doc.setHtml(text)
+            text = doc.toPlainText()
+
         return text
 
     def helpString(self):
@@ -771,7 +795,7 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
         self.flagParameterAsAdvanced(name, advanced)
 
     def addParameterVectorLayer(
-            self, name: str, description: str, types=(QgsProcessing.SourceType.TypeVectorAnyGeometry,),
+            self, name: str, description: str, types=(QgsProcessing.SourceType.TypeVector,),
             defaultValue=None, optional=False, advanced=False
     ):
         if types is None:
@@ -943,6 +967,28 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterString(name, description, defaultValue, multiLine, optional))
         self.flagParameterAsAdvanced(name, advanced)
 
+    def addParameterDateTime(
+            self, name: str, description: str, defaultValue=None, optional=False, minValue=QDateTime(),
+            maxValue=QDateTime(), advanced=False
+    ):
+        type = Qgis.ProcessingDateTimeParameterDataType.DateTime
+        self.addParameter(
+            QgsProcessingParameterDateTime(name, description, type, defaultValue, optional, minValue, maxValue)
+        )
+        self.flagParameterAsAdvanced(name, advanced)
+
+    def addParameterDate(
+            self, name: str, description: str, defaultValue=None, optional=False, minValue=QDate(),
+            maxValue=QDate(), advanced=False
+    ):
+        type = Qgis.ProcessingDateTimeParameterDataType.Date
+        minValue = QDateTime(minValue)
+        maxValue = QDateTime(maxValue)
+        self.addParameter(
+            QgsProcessingParameterDateTime(name, description, type, defaultValue, optional, minValue, maxValue)
+        )
+        self.flagParameterAsAdvanced(name, advanced)
+
     def addParameterCode(
             self, name: str, description: str, defaultValue=None, optional=False, advanced=False
     ):
@@ -1020,7 +1066,7 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
             text = link
         return '<a href="' + link + '">' + text + '</a>'
 
-    def tic(self, feedback: ProcessingFeedback, parameters: Dict[str, Any], context: QgsProcessingContext):
+    def tic(self, feedback, parameters: Dict[str, Any], context: QgsProcessingContext):
         self._startTime = time()
 
     def toc(self, feedback: ProcessingFeedback, result: Dict):
@@ -1029,6 +1075,11 @@ class EnMAPProcessingAlgorithm(QgsProcessingAlgorithm):
     @staticmethod
     def runAlg(algOrName, parameters, onFinish=None, feedback=None, context=None, is_child_algorithm=False) -> Dict:
         return processing.run(algOrName, parameters, onFinish, feedback, context, is_child_algorithm)
+
+    @staticmethod
+    def runAlgorithm(algOrName, parameters, onFinish=None, feedback=None, context=None) -> Dict:
+        from processing.core.Processing import Processing
+        return Processing.runAlgorithm(algOrName, parameters, onFinish, feedback, context)
 
 
 class Group(Enum):

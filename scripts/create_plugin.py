@@ -23,25 +23,25 @@ import configparser
 import fnmatch
 import io
 import os
-import pathlib
 import re
 import shutil
 import sys
 import textwrap
 import typing
 import warnings
-from typing import Union
 from os.path import exists
+from pathlib import Path
+from typing import Union
 
-import markdown
 import docutils.core
-from qgis.core import QgsFileUtils, QgsUserProfile, QgsUserProfileManager
-from qgis.testing import start_app
+import markdown
 
 import enmapbox
 from enmapbox import DIR_REPO
 from enmapbox.qgispluginsupport.qps.make.deploy import QGISMetadataFileWriter, userProfileManager
 from enmapbox.qgispluginsupport.qps.utils import zipdir
+from qgis.core import QgsFileUtils, QgsUserProfile, QgsUserProfileManager
+from qgis.testing import start_app
 
 app = start_app()
 # consider default Git location on Windows systems to avoid creating a Start-Up Script
@@ -69,17 +69,17 @@ except (ImportError, ModuleNotFoundError) as ex:
         os.environ['PATH'] = oldPath  # avoid side-effects!
         raise ex
 
-DIR_REPO = pathlib.Path(DIR_REPO)
+DIR_REPO = Path(DIR_REPO)
 
-PATH_CONFIG_FILE = DIR_REPO / '.plugin.ini'
+PATH_CONFIG_FILE = DIR_REPO / 'tox.ini'
 assert PATH_CONFIG_FILE.is_file()
 
 
-def scanfiles(root: typing.Union[str, pathlib.Path]) -> typing.Iterator[pathlib.Path]:
+def scanfiles(root: typing.Union[str, Path]) -> typing.Iterator[Path]:
     """
     Recursively returns file paths in directory
     :param root: root directory to search in
-    :return: pathlib.Path
+    :return: Path
     """
 
     for entry in os.scandir(root):
@@ -87,7 +87,7 @@ def scanfiles(root: typing.Union[str, pathlib.Path]) -> typing.Iterator[pathlib.
         if entry.is_dir(follow_symlinks=False):
             yield from scanfiles(entry.path)
         else:
-            path = pathlib.Path(entry.path)
+            path = Path(entry.path)
             if path.is_file():
                 yield path
 
@@ -118,14 +118,14 @@ def create_enmapbox_plugin(include_testdata: bool = False,
                            include_qgisresources: bool = False,
                            create_zip: bool = True,
                            copy_to_profile: bool = False,
-                           build_name: str = None) -> typing.Optional[pathlib.Path]:
+                           build_name: str = None) -> typing.Optional[Path]:
     assert (DIR_REPO / '.git').is_dir()
     config = configparser.ConfigParser()
     config.read(PATH_CONFIG_FILE)
 
-    MAX_PLUGIN_SIZE = int(config['plugin']['max_size_mb'])
+    MAX_PLUGIN_SIZE = int(config['enmapbox:plugin']['max_size_mb'])
     DIR_DEPLOY_LOCAL = DIR_REPO / 'deploy'
-    DIR_QGIS_USERPROFILE: pathlib.Path = None
+    DIR_QGIS_USERPROFILE: Path = None
 
     if copy_to_profile:
         profileManager: QgsUserProfileManager = userProfileManager()
@@ -140,7 +140,7 @@ def create_enmapbox_plugin(include_testdata: bool = False,
         profileManager.setActiveUserProfile(profileName)
         profile: QgsUserProfile = profileManager.userProfile()
 
-        DIR_QGIS_USERPROFILE = pathlib.Path(profile.folder())
+        DIR_QGIS_USERPROFILE = Path(profile.folder())
         if DIR_QGIS_USERPROFILE:
             os.makedirs(DIR_QGIS_USERPROFILE, exist_ok=True)
             if not DIR_QGIS_USERPROFILE.is_dir():
@@ -148,7 +148,7 @@ def create_enmapbox_plugin(include_testdata: bool = False,
 
     REPO = git.Repo(DIR_REPO)
     active_branch = REPO.active_branch.name
-    VERSION = config['metadata']['version']
+    VERSION = config['enmapbox:metadata']['version']
     VERSION_SHA = REPO.active_branch.commit.hexsha
     lastCommitDate = REPO.active_branch.commit.authored_datetime
     timestamp = re.split(r'[.+]', lastCommitDate.isoformat())[0]
@@ -165,7 +165,7 @@ def create_enmapbox_plugin(include_testdata: bool = False,
         BUILD_NAME = build_name
 
     if REPO.is_dirty():
-        if BUILD_NAME == VERSION:
+        if BUILD_NAME == VERSION and build_name is None:
             raise Exception('Repository has uncommitted changes!\n'
                             'Commit / rollback them first to ensure a valid VERSION_SHA for release builds!')
         else:
@@ -184,20 +184,19 @@ def create_enmapbox_plugin(include_testdata: bool = False,
 
     # set QGIS Metadata file values
     MD = QGISMetadataFileWriter()
-    MD.mName = config['metadata']['name']
-    MD.mDescription = config['metadata']['description']
-    MD.mTags = config['metadata']['tags'].strip().split('\n')
-    MD.mCategory = config['metadata']['category']
-    MD.mAuthor = config['metadata']['authors'].strip().split('\n')
-    MD.mIcon = config['metadata']['icon']
-    MD.mHomepage = config['metadata']['homepage']
-    MD.mAbout = markdownToHTML(pathAbout)
+    MD.mName = config['enmapbox:metadata']['name']
+    MD.mDescription = config['enmapbox:metadata']['description']
+    MD.mTags = config['enmapbox:metadata']['tags'].strip().split('\n')
+    MD.mCategory = config['enmapbox:metadata']['category']
+    MD.mAuthor = config['enmapbox:metadata']['authors'].strip().split('\n')
+    MD.mIcon = config['enmapbox:metadata']['icon']
+    MD.mHomepage = config['enmapbox:metadata']['homepage']
+    MD.mAbout = config.get('enmapbox:metadata', 'about').splitlines()
     MD.mTracker = enmapbox.ISSUE_TRACKER
     MD.mRepository = enmapbox.REPOSITORY
-    MD.mQgisMinimumVersion = config['metadata']['qgisMinimumVersion']
-    MD.mEmail = config['metadata']['email']
+    MD.mQgisMinimumVersion = config['enmapbox:metadata']['qgisMinimumVersion']
+    MD.mEmail = config['enmapbox:metadata']['email']
     MD.mHasProcessingProvider = True
-    MD.mPlugin_dependencies = ['Google Earth Engine']  # the best way to make sure that the 'ee' module is available
 
     MD.mVersion = VERSION
     MD.writeMetadataTxt(PATH_METADATAFILE)
@@ -207,16 +206,16 @@ def create_enmapbox_plugin(include_testdata: bool = False,
     compileEnMAPBoxResources()
 
     # copy EnMAP-Box icon source
-    path_icon_source = DIR_REPO / config['files']['icon']
-    path_icon_plugin = PLUGIN_DIR / config['metadata']['icon']
+    path_icon_source = DIR_REPO / config['enmapbox:files']['icon']
+    path_icon_plugin = PLUGIN_DIR / config['enmapbox:metadata']['icon']
     assert path_icon_source.is_file(), f'Icon source does not exists: {path_icon_source}'
     shutil.copy(path_icon_source, path_icon_plugin)
 
     # copy python and other resource files
     root = DIR_REPO.as_posix()
-    ignore_rx = [fileRegex(None, p) for p in config['files'].get('ignore').split()]
-    include_rx = [fileRegex(root, p) for p in config['files'].get('include').split()]
-    exclude_rx = [fileRegex(root, p) for p in config['files'].get('exclude').split()]
+    ignore_rx = [fileRegex(None, p) for p in config['enmapbox:files'].get('ignore').split()]
+    include_rx = [fileRegex(root, p) for p in config['enmapbox:files'].get('include').split()]
+    exclude_rx = [fileRegex(root, p) for p in config['enmapbox:files'].get('exclude').split()]
 
     files = []
     for file in scanfiles(DIR_REPO):
@@ -261,7 +260,7 @@ def create_enmapbox_plugin(include_testdata: bool = False,
             shutil.copytree(enmapbox.DIR_EXAMPLEDATA, DEST, dirs_exist_ok=True)
 
     if include_qgisresources:
-        qgisresources = pathlib.Path(DIR_REPO) / 'qgisresources'
+        qgisresources = Path(DIR_REPO) / 'qgisresources'
         shutil.copytree(qgisresources, PLUGIN_DIR / 'qgisresources')
 
     createCHANGELOG(PLUGIN_DIR)
@@ -318,8 +317,8 @@ def create_enmapbox_plugin(include_testdata: bool = False,
     return None
 
 
-def markdownToHTML(path_md: Union[str, pathlib.Path]) -> str:
-    path_md = pathlib.Path(path_md)
+def markdownToHTML(path_md: Union[str, Path]) -> str:
+    path_md = Path(path_md)
 
     html = None
     if not path_md.is_file():
@@ -345,15 +344,24 @@ def markdownToHTML(path_md: Union[str, pathlib.Path]) -> str:
             settings_overrides=overrides)
     elif path_md.name.endswith('.md'):
         with open(path_md, 'r', encoding='utf-8') as f:
-            md = f.readlines()
-        md = [l for l in md if 'details>' not in l]  # remove details section (see issue #990)
+            md = f.read()
+
+            # skip start comment in autogenerated changelog.md
+            if '# CHANGELOG' in md:
+                rxComments = re.compile(r'^.*(?=# CHANGELOG)', re.DOTALL)
+                md = rxComments.sub('', md)
+
+                # skip details lines
+                rxDetails = re.compile(r'</?details.*')
+                md = rxDetails.sub('', md)
+
         html = markdown.markdown(''.join(md))
     else:
         raise Exception(f'Unsupported file: {path_md}')
     return html
 
 
-def createCHANGELOG(dirPlugin: pathlib.Path) -> str:
+def createCHANGELOG(dirPlugin: Path) -> str:
     """
     Reads the CHANGELOG.rst and creates the deploy/CHANGELOG (without extension!) for the QGIS Plugin Manager
     :return:
@@ -368,7 +376,6 @@ def createCHANGELOG(dirPlugin: pathlib.Path) -> str:
 
     html = markdownToHTML(pathMD)
     if False:
-        from xml.dom import minidom
         xml = minidom.parseString(html)
         #  remove headline
         for i, node in enumerate(xml.getElementsByTagName('h1')):
@@ -412,7 +419,6 @@ def createCHANGELOG(dirPlugin: pathlib.Path) -> str:
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description='Install testdata', formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('-t', '--testdata',
                         required=False,
@@ -460,29 +466,3 @@ if __name__ == "__main__":
                                   create_zip=not args.skip_zip,
                                   copy_to_profile=args.profile,
                                   build_name=args.build_name)
-
-    if True:
-        message = \
-            r"""
-            Very important checklist. Do not remove!!!
-            Checklist for release:
-            Change log up-to-date?
-            Processing algo documentation up-to-date (run create_processing_rst)?
-            Run weblink checker (in doc folder make linkcheck).
-            Check if box runs without optional dependencies (see tests/non-blocking-dependencies/readme.txt).
-            Version number increased? (see .plugin.ini version = 3.x.y)
-            QGIS Min-Version? (enmapbox/__init__.py -> MIN_VERSION_QGIS)
-            Install ZIP and quick-test under the LTR and latest QGIS versions and OS, e.g.:
-                Andreas: latest Windows Conda QGIS
-                Fabian: Linux QGIS used in Greifswald-Teaching
-                Benjamin: latest OSGeo4W (maybe also MacOS?) QGIS
-                Plugin promotion (Slack, Email, ...)
-                  RTD
-                  Email an Saskia: update auf enmap.org (enmap news + enmap news letter)
-                  Email an enmap_wiss@gfz-potsdam.de
-                  Email an Ettore: reach out to PRISMA community
-                  EOL Slack + EnMAP Slack
-                  EOL Twitter
-            """
-
-        print(message)

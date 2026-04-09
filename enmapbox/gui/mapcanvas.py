@@ -18,11 +18,17 @@
 """
 import os
 import time
-import typing
 import warnings
 from _weakrefset import WeakSet
-from typing import List
+from typing import List, Optional
 
+from enmapbox import enmapboxSettings
+from enmapbox.enmapboxsettings import EnMAPBoxSettings
+from enmapbox.gui import MapTools, MapToolCenter, PixelScaleExtentMapTool, \
+    CursorLocationMapTool, FullExtentMapTool, QgsMapToolAddFeature, QgsMapToolSelect, \
+    CrosshairStyle, CrosshairMapCanvasItem
+from enmapbox.gui.mimedata import containsMapLayers, extractMapLayers
+from enmapbox.qgispluginsupport.qps.utils import SpatialPoint, SpatialExtent
 from qgis.PyQt.QtCore import Qt, QObject, QCoreApplication, pyqtSignal, QEvent, QPointF, QMimeData, QTimer, QSize, \
     QModelIndex, QAbstractListModel
 from qgis.PyQt.QtGui import QMouseEvent, QIcon, QDragEnterEvent, QDropEvent, QResizeEvent, QKeyEvent, QColor
@@ -35,14 +41,6 @@ from qgis.core import QgsLayerTreeLayer, QgsCoordinateReferenceSystem, QgsRectan
 from qgis.gui import QgsColorDialog, QgsLayerTreeMapCanvasBridge, QgsMapTool
 from qgis.gui import QgsMapCanvas, QgisInterface, QgsMapToolZoom, QgsAdvancedDigitizingDockWidget, \
     QgsProjectionSelectionWidget, QgsMapToolIdentify, QgsMapToolPan, QgsMapToolCapture, QgsMapMouseEvent
-
-from enmapbox import enmapboxSettings
-from enmapbox.enmapboxsettings import EnMAPBoxSettings
-from enmapbox.gui import MapTools, MapToolCenter, PixelScaleExtentMapTool, \
-    CursorLocationMapTool, FullExtentMapTool, QgsMapToolAddFeature, QgsMapToolSelect, \
-    CrosshairStyle, CrosshairMapCanvasItem
-from enmapbox.gui.mimedata import containsMapLayers, extractMapLayers
-from enmapbox.qgispluginsupport.qps.utils import SpatialPoint, SpatialExtent
 
 LINK_ON_SCALE = 'SCALE'
 LINK_ON_CENTER = 'CENTER'
@@ -641,7 +639,7 @@ class CanvasLink(QObject):
             handledCanvases = [initialSrcCanvas]
 
             def nextLinkGeneration(srcCanvases: list):
-                nonlocal handledCanvases
+                # nonlocal handledCanvases
 
                 generations = dict()
                 for srcCanvas in srcCanvases:
@@ -745,16 +743,16 @@ class CanvasLink(QObject):
 
         scaledWidth = mapUnitsPerPx_x * dstCanvas.width()
         scaledHeight = mapUnitsPerPx_y * dstCanvas.height()
-        scaledBoxCenterDst = SpatialExtent(dstCrs, scaledWidth, scaledHeight).setCenter(centerDst)
-        scaledBoxCenterSrc = SpatialExtent(dstCrs, scaledWidth, scaledHeight).setCenter(centerSrc.toCrs(dstCrs))
+
         if self.linkType == LINK_ON_CENTER:
-            dstCanvas.setCenter(centerT)
+            dstCanvas.setCenter(centerSrc.toCrs(dstCrs))
 
         elif self.linkType == LINK_ON_SCALE:
-
+            scaledBoxCenterDst = SpatialExtent(dstCrs, scaledWidth, scaledHeight).setCenter(centerDst)
             dstCanvas.zoomToFeatureExtent(scaledBoxCenterDst)
 
         elif self.linkType == LINK_ON_CENTER_SCALE:
+            scaledBoxCenterSrc = SpatialExtent(dstCrs, scaledWidth, scaledHeight).setCenter(centerSrc.toCrs(dstCrs))
             dstCanvas.zoomToFeatureExtent(scaledBoxCenterSrc)
 
         else:
@@ -914,8 +912,9 @@ class MapCanvas(QgsMapCanvas):
     def mousePressEvent(self, event: QMouseEvent):
 
         self.setProperty(KEY_LAST_CLICKED, time.time())
-        set_cursor_location: bool = event.button() == Qt.LeftButton and \
-            isinstance(self.mapTool(), (QgsMapToolIdentify, CursorLocationMapTool))
+        set_cursor_location: bool = (event.button() == Qt.LeftButton and isinstance(self.mapTool(),
+                                                                                    (QgsMapToolIdentify,
+                                                                                     CursorLocationMapTool)))
 
         super(MapCanvas, self).mousePressEvent(event)
 
@@ -973,6 +972,7 @@ class MapCanvas(QgsMapCanvas):
             event = QgsMapMouseEvent(self, event)
         assert isinstance(menu, QMenu)
         assert isinstance(event, QgsMapMouseEvent)
+        menu.setToolTipsVisible(True)
         mapSettings = self.mapSettings()
         assert isinstance(mapSettings, QgsMapSettings)
         pos: QPointF = event.pos()
@@ -995,7 +995,7 @@ class MapCanvas(QgsMapCanvas):
         else:
             self.setLayers([])
 
-    def layerTree(self) -> typing.Optional['MapDockTreeNode']:  # noqa: F821
+    def layerTree(self) -> Optional['MapDockTreeNode']:  # noqa: F821
         """
         Returns the MapDockTreeNode that is linked to this MapCanvas by a QgsLayerTreeMapCanvasBridge.
         Can be None
@@ -1074,7 +1074,7 @@ class MapCanvas(QgsMapCanvas):
 
         super(MapCanvas, self).keyPressEvent(e)
 
-    def layerPaths(self) -> typing.List[str]:
+    def layerPaths(self) -> List[str]:
         """
         Returns the paths/URIs of presented QgsMapLayers
         :return:
@@ -1306,7 +1306,7 @@ class MapCanvas(QgsMapCanvas):
             for canvas in cLink.canvases:
                 canvas.removeCanvasLink(cLink)
 
-    def setLayers(self, mapLayers: typing.List[QgsMapLayer]):
+    def setLayers(self, mapLayers: List[QgsMapLayer]):
         """
         Sets the list of mapLayers to show in the map canvas
         :param mapLayers: QgsMapLayer or [list-of-QgsMapLayers]

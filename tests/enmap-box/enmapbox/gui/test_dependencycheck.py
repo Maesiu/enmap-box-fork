@@ -13,16 +13,16 @@ __date__ = '2017-07-17'
 __copyright__ = 'Copyright 2017, Benjamin Jakimow'
 
 import os
-import pathlib
 import sys
 import unittest
 import uuid
+from pathlib import Path
 from time import sleep
 from typing import List, Tuple
 
 from enmapbox.dependencycheck import PIPPackage, requiredPackages, PIPPackageInstaller, PIPPackageInfoTask, \
     localPythonExecutable, missingPackageInfo, checkGDALIssues, PIPPackageInstallerTableModel, \
-    call_pip_command, localPipExecutable
+    call_pip_command, localPipExecutable, installTestData
 from enmapbox.testing import EnMAPBoxTestCase, start_app
 from qgis.PyQt.QtCore import QProcess
 from qgis.PyQt.QtGui import QMovie
@@ -33,6 +33,7 @@ from qgis.core import QgsApplication
 start_app()
 
 
+# @unittest.skipIf(EnMAPBoxTestCase.runsInCI(), 'Skipped, takes too much time')
 class test_dependencycheck(EnMAPBoxTestCase):
 
     def test_gdalissues(self):
@@ -40,6 +41,11 @@ class test_dependencycheck(EnMAPBoxTestCase):
         self.assertIsInstance(issues, list)
         for i in issues:
             self.assertIsInstance(i, str)
+
+    @unittest.skipIf(EnMAPBoxTestCase.runsInCI(), 'Skipped, manual testing only and blocking dialog')
+    def test_installTestData(self):
+
+        installTestData(overwrite_existing=True, ask=True)
 
     def test_pip_call(self):
 
@@ -73,15 +79,14 @@ class test_dependencycheck(EnMAPBoxTestCase):
         self.assertTrue(pipName in info)
 
     def test_pippackage(self):
-        pkg = PIPPackage('GDAL', py_name='osgeo.gdal')
+        pkg = PIPPackage('GDAL', py_name='osgeo.gdal', required_by='core')
 
         self.assertTrue(pkg.isInstalled())
-        self.assertIsInstance(pkg.installCommand(), str)
-        pkg.installPackage()
+        self.assertTrue(pkg.isCoreRequirement())
 
         pkg = PIPPackage(self.nonexistingPackageName())
         self.assertFalse(pkg.isInstalled())
-        self.assertIsInstance(pkg.installCommand(), str)
+        self.assertFalse(pkg.isCoreRequirement())
 
     def test_pippackagemodel(self):
         model = PIPPackageInstallerTableModel()
@@ -127,18 +132,30 @@ class test_dependencycheck(EnMAPBoxTestCase):
 
     @unittest.skipIf(EnMAPBoxTestCase.runsInCI(), 'Skipped, would take too long')
     def test_PIPInstaller(self):
-        pkgs = [PIPPackage(self.nonexistingPackageName()),
+        pkgs = [PIPPackage(self.nonexistingPackageName(), required_by='core'),
                 PIPPackage(self.nonexistingPackageName()),
                 PIPPackage(self.nonexistingPackageName())]
+        pkgs = []
         pkgs += requiredPackages()
         w = PIPPackageInstaller()
 
-        w.addPackages(pkgs, required=True)
-        # w.installAll()
-        # w.model.installAll()
+        w.addPackages(pkgs)
+        w.setPrimaryFilter('all')
+
+        n_total = w.proxyModel.rowCount()
+        self.assertEqual(n_total, w.model.rowCount())
+
+        w.setPrimaryFilter('required')
+        n_required = w.proxyModel.rowCount()
+
+        w.setPrimaryFilter('missing')
+        n_missing = w.proxyModel.rowCount()
+
+        # self.assertTrue(n_total > n_required > n_missing)
 
         self.showGui(w)
 
+    @unittest.skipIf(EnMAPBoxTestCase.runsInCI(), 'Skipped, demo only')
     def test_AnimatedIcon(self):
         label = QLabel()
         p = QgsApplication.iconPath("/mIconLoading.gif")
@@ -258,9 +275,15 @@ class test_dependencycheck(EnMAPBoxTestCase):
 
         s = ""
 
+    def test_find_pipexe(self):
+
+        p = localPipExecutable()
+        self.assertIsInstance(p, Path)
+        self.assertTrue(p.is_file())
+
     def test_findpython(self):
         p = localPythonExecutable()
-        self.assertIsInstance(p, pathlib.Path)
+        self.assertIsInstance(p, Path)
         self.assertTrue(p.is_file())
         self.assertTrue('python' in p.name.lower())
 

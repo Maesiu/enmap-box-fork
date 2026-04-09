@@ -2,17 +2,19 @@ import pathlib
 import site
 import unittest
 
-from enmapbox import DIR_ENMAPBOX
+from enmapbox import DIR_ENMAPBOX, initAll
 from enmapbox.gui.enmapboxgui import EnMAPBox
+from enmapbox.qgispluginsupport.qps.qgsrasterlayerproperties import QgsRasterLayerSpectralProperties
 from enmapbox.qgispluginsupport.qps.speclib.core import profile_field_list
-from enmapbox.qgispluginsupport.qps.speclib.core.spectrallibraryrasterdataprovider import registerDataProvider
-from enmapbox.qgispluginsupport.qps.speclib.core.spectralprofile import SpectralSetting
 from enmapbox.qgispluginsupport.qps.speclib.gui.spectrallibrarywidget import SpectralLibraryWidget
 from enmapbox.qgispluginsupport.qps.speclib.gui.spectralprocessingdialog import SpectralProcessingDialog
-from enmapbox.testing import EnMAPBoxTestCase, TestObjects
+from enmapbox.testing import EnMAPBoxTestCase, TestObjects, start_app
 from qgis.PyQt.QtWidgets import QDialogButtonBox
 from qgis.core import QgsApplication, QgsProject
 from qgis.core import QgsVectorLayer, QgsProcessingRegistry, QgsProcessingAlgorithm
+
+start_app()
+initAll()
 
 site.addsitedir(pathlib.Path(DIR_ENMAPBOX) / 'coreapps')
 site.addsitedir(pathlib.Path(DIR_ENMAPBOX) / 'eo4qapps')
@@ -21,13 +23,10 @@ site.addsitedir(pathlib.Path(DIR_ENMAPBOX) / 'eo4qapps')
 class TestEnMAPBoxApplications(EnMAPBoxTestCase):
 
     def test_createtestdata(self):
-        EB: EnMAPBox = EnMAPBox.instance()
-        if not isinstance(EB, EnMAPBox):
-            EB = EnMAPBox()
-            EB.initEnMAPBoxApplications()
+        EB = EnMAPBox()
         all_ids = [a.id() for a in QgsApplication.processingRegistry().algorithms()]
 
-        test_algs = [a for a in all_ids if a.startswith('enmapbox:CreateTest')]
+        test_algs = [a for a in all_ids if a.startswith('enmapbox:CreateTest'.lower())]
 
         from processing.gui.AlgorithmDialog import AlgorithmDialog
         import time
@@ -77,13 +76,12 @@ class TestEnMAPBoxApplications(EnMAPBoxTestCase):
         QgsProject.instance().removeAllMapLayers()
 
     def test_Resampling(self):
-        registerDataProvider()
 
-        aid = 'enmapbox:SpectralResamplingToLandsat89Oli'
+        aid = 'enmapbox:SpectralResamplingToLandsat89Oli'.lower()
         reg: QgsProcessingRegistry = QgsApplication.instance().processingRegistry()
         alg = reg.algorithmById(aid)
         if not isinstance(alg, QgsProcessingAlgorithm):
-            self.skipTest(f'Unable to load {aid} from processing regisry.')
+            self.skipTest(f'Unable to load {aid} from processing registry.')
 
         n_bands = [256, 13]
         n_features = 20
@@ -108,10 +106,12 @@ class TestEnMAPBoxApplications(EnMAPBoxTestCase):
         procw.runAlgorithm(fail_fast=True)
         tempFiles = procw.temporaryRaster()
         for file in tempFiles:
-            setting = SpectralSetting.fromRasterLayer(file)
-            assert setting.xUnit() not in [None, '']
+            props = QgsRasterLayerSpectralProperties.fromRasterLayer(file)
+            wlu = props.wavelengthUnits()
+            assert wlu[0] not in [None, '']
 
         self.showGui([slw, procw])
+        QgsProject.instance().removeAllMapLayers()
 
 
 if __name__ == "__main__":

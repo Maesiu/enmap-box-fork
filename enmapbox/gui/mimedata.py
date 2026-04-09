@@ -1,3 +1,4 @@
+import logging
 import pickle
 import typing
 import uuid
@@ -9,10 +10,10 @@ from qgis.PyQt.QtXml import QDomNamedNodeMap, QDomDocument
 from qgis.core import QgsLayerItem
 from qgis.core import QgsMapLayer, QgsRasterLayer, QgsProject, QgsReadWriteContext, \
     QgsMimeDataUtils, QgsLayerTree
-
-from enmapbox import debugLog
 from .datasources.datasources import DataSource
 from ..qgispluginsupport.qps.layerproperties import defaultRasterRenderer
+
+logger = logging.getLogger(__name__)
 
 MDF_RASTERBANDS = 'application/enmapbox.rasterbanddata'
 
@@ -201,6 +202,9 @@ def extractMapLayers(mimeData: QMimeData,
             for dataSource in dataSources:
                 if isinstance(dataSource, SpatialDataSource):
                     lyr = dataSource.asMapLayer(project=project)
+                    if lyr is None and project != QgsProject.instance():
+                        lyr = dataSource.asMapLayer(project=QgsProject.instance())
+
                     if isinstance(lyr, QgsMapLayer):
                         # if isinstance(lyr, QgsRasterLayer):
                         #     lyr.setRenderer(defaultRasterRenderer(lyr))
@@ -239,7 +243,7 @@ def extractMapLayers(mimeData: QMimeData,
     info = ['Extract map layers from QMimeData']
     info.append('Formats:' + ','.join(mimeData.formats()))
     info.append(f' {len(newMapLayers)} Map Layers: ' + '\n\t'.join([f'{lyr}' for lyr in newMapLayers]))
-    debugLog('\n'.join(info))
+    logger.debug('\n'.join(info))
 
     return newMapLayers
 

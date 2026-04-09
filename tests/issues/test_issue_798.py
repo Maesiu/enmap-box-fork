@@ -5,57 +5,20 @@ from enmapbox.qgispluginsupport.qps.speclib.gui.spectrallibrarywidget import Spe
 from enmapbox.qgispluginsupport.qps.speclib.gui.spectralprocessingdialog import SpectralProcessingDialog
 from enmapbox.testing import EnMAPBoxTestCase, start_app, TestObjects
 from enmapboxprocessing.algorithm.fitpcaalgorithm import FitPcaAlgorithm
-from qgis.core import QgsProcessingFeedback, QgsProcessingContext, QgsProcessingAlgorithm
 from qgis.core import QgsProject, edit
 
 start_app()
-
-
-class TestProcessingAlgorithm(QgsProcessingAlgorithm):
-
-    def __init__(self):
-        super(TestProcessingAlgorithm, self).__init__()
-        s = ""
-
-    def createInstance(self):
-        return TestProcessingAlgorithm()
-
-    def name(self):
-        return 'exmapleLoginAlg'
-
-    def displayName(self):
-        return 'Example Algorithm with log'
-
-    def groupId(self):
-        return 'exampleapp'
-
-    def group(self):
-        return 'TEST APPS'
-
-    def initAlgorithm(self, configuration=None):
-        pass
-
-    def processAlgorithm(self, parameters: dict, context: QgsProcessingContext, feedback: QgsProcessingFeedback):
-        feedback.setProgress(10)
-        feedback.setProgressText('progress test')
-        feedback.pushDebugInfo('pushed debug info')
-        feedback.pushWarning('warning')
-        feedback.setProgress(20)
-
-        outputs = {}
-        return outputs
+initAll()
 
 
 class TestIssue764(EnMAPBoxTestCase):
 
     def test_SpectralProcessing_Logging(self):
-        initAll()
-
         speclib = TestObjects.createSpectralLibrary(2)
 
         alg = FitPcaAlgorithm()
 
-        algorithmId = 'enmapbox:FitPca'
+        algorithmId = 'enmapbox:FitPca'.lower()
         parameters = {'featureRaster': 'profile0'}
 
         def checkOutputs(outputs):

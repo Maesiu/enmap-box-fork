@@ -8,15 +8,14 @@ from enmapbox.testing import EnMAPBoxTestCase, start_app, TestObjects
 from qgis.core import QgsProject, edit
 
 start_app()
+initAll()
 
 
 class TestIssue764(EnMAPBoxTestCase):
 
     def test_SpectralProcessing_RasterMath(self):
-        initAll()
-
         speclib = TestObjects.createSpectralLibrary(2)
-        algorithmId = 'enmapbox:RasterMath'
+        algorithmId = 'enmapbox:RasterMath'.lower()
 
         parameters = {'code': 'my code input'}
 
@@ -34,6 +33,8 @@ class TestIssue764(EnMAPBoxTestCase):
                 self.assertEqual(w.value(), v)
 
             s = ""
+            spd.runButton().animateClick(0)
+
             self.showGui([spd, slw])
 
         QgsProject.instance().removeAllMapLayers()
