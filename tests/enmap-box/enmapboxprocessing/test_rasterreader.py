@@ -1,14 +1,18 @@
+import unittest
+from os.path import exists
+
 import numpy as np
 from osgeo import gdal
-
-from enmapboxprocessing.rasterblockinfo import RasterBlockInfo
-from enmapboxprocessing.rasterreader import RasterReader
-from enmapboxprocessing.testcase import TestCase
-from enmapboxprocessing.utils import Utils
-from enmapboxtestdata import enmap, r_terra_timeseries_days, r_terra_timeseries_seconds, netCDF_timeseries_days
-from enmapboxtestdata import fraction_polygon_l3
 from qgis.PyQt.QtCore import QDateTime, QSizeF, QPoint
 from qgis.core import QgsRasterRange, QgsRasterLayer, Qgis, QgsRectangle, QgsCoordinateReferenceSystem
+
+from enmapboxprocessing.rasterblockinfo import RasterBlockInfo
+from enmapboxprocessing.rasterreader import RasterReader, setMetadataCache, metadataCache
+from enmapboxprocessing.testcase import TestCase
+from enmapboxprocessing.utils import Utils
+from enmapboxtestdata import enmap, r_terra_timeseries_days, r_terra_timeseries_seconds, netCDF_timeseries_days, \
+    SensorProducts, sensorProductsRoot
+from enmapboxtestdata import fraction_polygon_l3
 
 
 class TestRasterReader(TestCase):
@@ -305,10 +309,12 @@ class TestRasterReader(TestCase):
         writer.setMetadataItem('wavelength_unit', 'Micrometers', '', 4)
         writer.close(stac=True)
         reader = RasterReader(writer.source())
-        self.assertEqual('Micrometers', reader.wavelengthUnits(1))  # STAC stores it as Micrometers
-        self.assertEqual('Micrometers', reader.wavelengthUnits(2))  # STAC stores it as Micrometers
-        self.assertEqual('Micrometers', reader.wavelengthUnits(3))  # STAC stores it as Micrometers
-        self.assertEqual('Micrometers', reader.wavelengthUnits(4))  # STAC stores it as Micrometers
+        disableStac = True
+        if not disableStac:
+            self.assertEqual('Micrometers', reader.wavelengthUnits(1))  # STAC stores it as Micrometers
+            self.assertEqual('Micrometers', reader.wavelengthUnits(2))  # STAC stores it as Micrometers
+            self.assertEqual('Micrometers', reader.wavelengthUnits(3))  # STAC stores it as Micrometers
+            self.assertEqual('Micrometers', reader.wavelengthUnits(4))  # STAC stores it as Micrometers
 
         # check at dataset-level
         writer = self.rasterFromArray(np.zeros((3, 1, 1)))
@@ -343,13 +349,18 @@ class TestRasterReader(TestCase):
         self.assertEqual(500, reader.wavelength(2))
 
     def test_wavelengthFromGdalImageryDomain(self):
-
         writer = self.rasterFromArray(np.zeros((1, 1, 1)))
         writer.setMetadataItem('CENTRAL_WAVELENGTH_UM', 42, 'IMAGERY', 1)
         writer.close()
         reader = RasterReader(writer.source())
         self.assertEqual('Micrometers', reader.wavelengthUnits(1))
         self.assertEqual(42 * 1000, reader.wavelength(1))
+
+    def test_wavelengthTanager(self):
+        if sensorProductsRoot() is None:
+            return
+        reader = RasterReader(SensorProducts.Tanager.basic_radiance_toa_radiance)
+        self.assertEqual(376.44, reader.wavelength(1, raw=True))  # raw
 
     def test_findWavelength(self):
         writer = self.rasterFromArray(np.zeros((5, 1, 1)))
@@ -571,6 +582,7 @@ class TestRasterReader(TestCase):
         self.assertEqual(gold * 2, reader.lineMemoryUsage(nBands=bandCount * 2))
         self.assertEqual(gold * 2, reader.lineMemoryUsage(dataTypeSize=8))
 
+    @unittest.skip('STAC disabled')
     def test_stacMetadata(self):
         writer = self.rasterFromArray(np.zeros((1, 5, 5)), 'raster.tif')
         writer.close()
@@ -603,6 +615,7 @@ class TestRasterReader(TestCase):
         self.assertEqual(QDateTime(2022, 1, 1, 12, 0, 0), reader.centerTime(1))
         self.assertEqual(0, reader.badBandMultiplier(1))
 
+    @unittest.skip('STAC disabled')
     def test_stacMetadata_dateTimeRange(self):
         writer = self.rasterFromArray(np.zeros((1, 5, 5)), 'raster.tif')
         stacMetadata = {
@@ -623,6 +636,7 @@ class TestRasterReader(TestCase):
         self.assertEqual(QDateTime(2022, 1, 3, 12, 0, 0), reader.endTime(1))
         self.assertEqual(QDateTime(2022, 1, 2, 12, 0, 0), reader.centerTime(1))
 
+    @unittest.skip('STAC disabled')
     def test_stacMetadata_enviStyle(self):
         writer = self.rasterFromArray(np.zeros((2, 5, 5)), 'raster.tif')
         writer.close()
@@ -657,6 +671,7 @@ class TestRasterReader(TestCase):
         self.assertEqual(QDateTime(2022, 1, 1, 12, 0, 0), reader.centerTime())
         self.assertEqual(42, reader.metadataItem('my_key', 'envi'))
 
+    @unittest.skip('STAC disabled')
     def test_stacMetadata_enviStyle_datetime(self):
         writer = self.rasterFromArray(np.zeros((2, 5, 5)), 'raster.tif')
         stacMetadata = {
@@ -675,6 +690,7 @@ class TestRasterReader(TestCase):
         self.assertEqual(QDateTime(2023, 1, 1, 12, 0, 0), reader.startTime(2))
         self.assertEqual(QDateTime(2023, 1, 1, 12, 0, 0), reader.centerTime(2))
 
+    @unittest.skip('STAC disabled')
     def test_stacMetadata_enviStyle_datetime2(self):
         writer = self.rasterFromArray(np.zeros((2, 5, 5)), 'raster.tif')
         stacMetadata = {
@@ -725,3 +741,44 @@ class TestRasterReader(TestCase):
         print(array)
 
         # self.assertTrue(np.all(np.equal(reader.noDataValue(1), lead)))
+
+    def test_rasterWithAlphaBand(self):
+        filename = r'D:\data\software\gdal\alphaBand.tif'
+        if not exists(filename):
+            return
+        # filename = enmap
+        reader = RasterReader(filename)
+        lastBand = reader.bandCount()
+        print(reader.wavelength(lastBand))
+        print(reader.bandName(lastBand))
+        print(reader.bandScale(lastBand))
+        print(reader.bandOffset(lastBand))
+        print(reader.bandColor(lastBand))
+        print(reader.badBandMultiplier(lastBand))
+
+        print(reader.startTime(lastBand))
+        print(reader.centerTime(lastBand))
+        print(reader.endTime(lastBand))
+
+    def test_metadataCache(self):
+        writer = self.rasterFromValue((3, 1, 1), 0, 'raster.tif')
+        writer.close()
+        layer = QgsRasterLayer(writer.source())
+
+        # check no cache
+        reader = RasterReader(layer)
+        self.assertIsNone(reader.metadataCache)
+        self.assertIsNone(reader.metadataCache)
+
+        # check valid cache
+        cache = {
+            'wavelength': [10, None, 30]
+        }
+        setMetadataCache(layer, cache)
+        reader = RasterReader(layer)
+        self.assertDictEqual(cache, metadataCache(layer))
+        self.assertDictEqual(cache, reader.metadataCache)
+
+        self.assertEqual(cache['wavelength'][0], reader.wavelength(1))
+        self.assertIsNone(reader.wavelength(2))
+        self.assertEqual(cache['wavelength'][2], reader.wavelength(3))

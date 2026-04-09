@@ -280,7 +280,7 @@ def sensorProductsRoot() -> Optional[str]:
     root = None
     try:
         root = {
-            'Andreas@PC-21-0602': r'd:\data\sensors'
+            'janzandr@PC-25-0201': r'd:\data\sensors'
         }.get(os.getlogin() + '@' + platform.node())
     except OSError as ex:
         warnings.warn(f'Exception raised in sensorProductsRoot():\n{ex}')
@@ -297,7 +297,7 @@ def speclibProductsRoot() -> Optional[str]:
     root = None
     try:
         root = {
-            'Andreas@PC-21-0602': r'd:\data\speclibs'
+            'janzandr@PC-25-0201': r'd:\data\speclibs'
         }.get(os.getlogin() + '@' + platform.node())
     except OSError as ex:
         warnings.warn(f'Exception raised in sensorProductsRoot():\n{ex}')
@@ -359,7 +359,11 @@ class SensorProducts(object):
             )
             L2A_ARD = join(sensorProductsRoot(), 'enmap', 'ard')
             L2A_ARD_MetadataXml = join(
-                L2A_ARD, 'ENMAP01-____L2A-DT0000071543_20240502T105133Z_003_V010402_20240505T210636Z-METADATA.XML'
+                L2A_ARD, 'ENMAP01-____L2A-DT0000071543_20240502T105133Z_003_V010402_20240505T210636Z-METADATA.xml'
+            )
+            L2A_Zip = join(
+                sensorProductsRoot(), 'enmap', 'raw',
+                'ENMAP01-____L2A-DT0000001867_20220724T104526Z_008_V010111_20230213T084607Z.ZIP'
             )
 
         class Landsat(object):  # collection 2 only
@@ -449,9 +453,19 @@ class SensorProducts(object):
                 sensorProductsRoot(), 'sentinel2', 'S2B_MSIL2A_20211028T102039_N0301_R065_T33UUU_20211028T121942.SAFE'
             )
             S2B_L2A_MsiL1CXml = join(S2B_L2A, 'MTD_MSIL2A.xml')
+            S2B_L2A_Zip = S2B_L2A + '.zip'
+
+        class Tanager(object):
+            basic_radiance_h5 = join(sensorProductsRoot(), 'tanager', '20250224_145149_32_4001_basic_radiance.h5')
+            basic_radiance_toa_radiance = f'HDF5:"{basic_radiance_h5}"://HDFEOS/SWATHS/HYP/Data_Fields/toa_radiance'
+            # basic_sr = join(sensorProductsRoot(), 'tanager', '20250503_112046_16_4001_basic_sr.h5')
+            # ortho_sr = join(sensorProductsRoot(), 'tanager', '20250503_112046_16_4001_ortho_sr.h5')
 
 
 class SpeclibProducts(object):
     if speclibProductsRoot() is not None:
         class UsgsSplib07(object):
             folder = join(speclibProductsRoot(), 'usgs_splib07')
+            ASCIIdata_splib07b_rsLandsat8 = join(
+                speclibProductsRoot(), 'usgs_splib07_childItems', 'ASCIIdata_splib07b_rsLandsat8'
+            )

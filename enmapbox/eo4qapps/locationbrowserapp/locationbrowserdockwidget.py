@@ -12,13 +12,13 @@ from enmapboxprocessing.utils import Utils
 from geetimeseriesexplorerapp import MapTool
 from locationbrowserapp.locationbrowserresultwidget import LocationBrowserResultWidget
 from qgis.PyQt import uic
-from qgis.PyQt.QtWidgets import QListWidgetItem, QToolButton
+from qgis.PyQt.QtWidgets import QListWidgetItem, QToolButton, QDockWidget
 from qgis.core import QgsCoordinateReferenceSystem, QgsVectorLayer, QgsFeature, QgsGeometry, QgsPointXY, QgsProject
-from qgis.gui import QgsFilterLineEdit, QgsDockWidget, QgisInterface
+from qgis.gui import QgsFilterLineEdit, QgisInterface
 
 
 @typechecked
-class LocationBrowserDockWidget(QgsDockWidget):
+class LocationBrowserDockWidget(QDockWidget):
     mSearch: QgsFilterLineEdit
     mGoToLocation: QToolButton
     mRequestNominatim: QToolButton
@@ -27,7 +27,8 @@ class LocationBrowserDockWidget(QgsDockWidget):
     EnmapBoxInterface, QgisInterface = 0, 1
 
     def __init__(self, currentLocationMapTool: Optional[MapTool], parent=None):
-        QgsDockWidget.__init__(self, parent)
+        # QgsDockWidget.__init__(self, parent)
+        super().__init__(parent)
         uic.loadUi(__file__.replace('.py', '.ui'), self)
 
         self.currentLocationMapTool = currentLocationMapTool

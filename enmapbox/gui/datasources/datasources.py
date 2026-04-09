@@ -2,10 +2,11 @@ import datetime
 import json
 import pickle
 import warnings
+from typing import Optional
 
 from qgis.PyQt.QtGui import QIcon
 from qgis.core import QgsCoordinateReferenceSystem, QgsUnitTypes, \
-    QgsMapLayerType, QgsVectorLayer, Qgis, QgsWkbTypes, QgsField, QgsProject
+    QgsMapLayerType, QgsVectorLayer, QgsVectorTileLayer, Qgis, QgsWkbTypes, QgsField, QgsProject
 from qgis.core import QgsDataItem, QgsLayerItem, QgsMapLayer, QgsRasterLayer
 from .metadata import CRSLayerTreeNode, RasterBandTreeNode, DataSourceSizesTreeNode
 from ...qgispluginsupport.qps.classification.classificationscheme import ClassificationScheme
@@ -16,36 +17,47 @@ from ...qgispluginsupport.qps.utils import SpatialExtent, parseWavelength, iconF
 
 class LayerItem(QgsLayerItem):
     """
-    A QgsLayerItem that allows to store a QgsMapLayer reference.
-    This reference is necessary to retain access to QgsVectorLayer of provider `memory`.
+    A QgsLayerItem that allows to store a handle to get project-bound map layer.
+    This is required to keep a link to in-memory layers, which cannot be cloned.
     """
 
-    def __init__(self, *args, layerRef: QgsMapLayer = None, **kwds, ):
+    def __init__(self, *args, **kwds, ):
         super().__init__(*args, **kwds)
-        self.mLayerRef = layerRef
+        self.mLayerProject: Optional[QgsProject] = None
+        self.mLayerID: Optional[str] = None
 
-    def setReferenceLayer(self, layer: QgsMapLayer):
+    def layerId(self) -> Optional[str]:
+        return self.mLayerID
+
+    def hasReferenceLayer(self) -> bool:
+        return isinstance(self.mLayerProject, QgsProject) and isinstance(self.mLayerID,
+                                                                         str) and self.mLayerID in self.mLayerProject.mapLayers()
+
+    def setReferenceLayer(self, layer: QgsMapLayer, project: Optional[QgsProject] = None):
         assert isinstance(layer, QgsMapLayer)
-        self.mLayerRef = layer
+        if project is None:
+            project = layer.project()
+        if project is None:
+            project = QgsProject.instance()
+        self.mLayerProject = project
+        self.mLayerID = layer.id()
 
-    def referenceLayer(self) -> QgsMapLayer:
-        return self.mLayerRef
+    def referenceLayer(self) -> Optional[QgsMapLayer]:
+        if self.mLayerProject:
+            return self.mLayerProject.mapLayer(self.mLayerID)
+        return None
 
     def __repr__(self):
         return f'<{self.__class__.__name__}: "{self.name()}" {self.path()}>'
 
 
 def dataItemToLayer(dataItem: QgsDataItem,
-                    project: QgsProject = None) -> QgsMapLayer:
-    lyr = None
+                    project: Optional[QgsProject] = None) -> Optional[QgsMapLayer]:
     if project is None:
         project = QgsProject.instance()
+
     if isinstance(dataItem, QgsLayerItem):
-        if isinstance(dataItem, LayerItem) and isinstance(dataItem.referenceLayer(), QgsMapLayer):
-            if dataItem.mapLayerType() == QgsMapLayerType.VectorLayer:
-                assert isinstance(dataItem.referenceLayer(), QgsVectorLayer)
-            elif dataItem.mapLayerType() == QgsMapLayerType.RasterLayer:
-                assert isinstance(dataItem.referenceLayer(), QgsRasterLayer)
+        if isinstance(dataItem, LayerItem) and dataItem.hasReferenceLayer():
             return dataItem.referenceLayer()
 
         elif dataItem.mapLayerType() == QgsMapLayerType.VectorLayer:
@@ -56,10 +68,19 @@ def dataItemToLayer(dataItem: QgsDataItem,
             else:
                 lyr = QgsVectorLayer(dataItem.path(), dataItem.name(), dataItem.providerKey())
                 lyr.loadDefaultStyle()
+                return lyr
+
         elif dataItem.mapLayerType() == QgsMapLayerType.RasterLayer:
             lyr = QgsRasterLayer(dataItem.path(), dataItem.name(), dataItem.providerKey())
             lyr.loadDefaultStyle()
-    return lyr
+            return lyr
+
+        elif dataItem.mapLayerType() == QgsMapLayerType.VectorTileLayer:
+            lyr = QgsVectorTileLayer(dataItem.path(), dataItem.name())
+            lyr.loadDefaultStyle()
+            return lyr
+
+    return None
 
 
 class DataSource(TreeNode):
@@ -108,7 +129,10 @@ class DataSource(TreeNode):
         self.mUpdateTime = datetime.datetime.now()
         dataItem: QgsDataItem = self.dataItem()
         self.setName(dataItem.name())
-        self.setToolTip(dataItem.toolTip())
+        tt = dataItem.toolTip()
+        if tt is None or len(tt) == 0:
+            tt = dataItem.path()
+        self.setToolTip(tt)
         self.setIcon(dataItem.icon())
 
         self.mNodePath.setValue(dataItem.path())
@@ -130,7 +154,7 @@ class SpatialDataSource(DataSource):
         self.mNodeSize.appendChildNodes([self.nodeExtXmu, self.nodeExtYmu])
         self.appendChildNodes(self.nodeCRS)
 
-    def asMapLayer(self, project: QgsProject = None) -> QgsMapLayer:
+    def asMapLayer(self, project: Optional[QgsProject] = None) -> QgsMapLayer:
         if project is None:
             project = QgsProject.instance()
         return dataItemToLayer(self.dataItem(), project=project)
@@ -156,6 +180,14 @@ class SpatialDataSource(DataSource):
             self.nodeExtXmu.setValue(None)
             self.nodeExtYmu.setValue(None)
         return MD
+
+
+class VectorTileDataSource(SpatialDataSource):
+
+    def __init__(self, dataItem: QgsLayerItem):
+        super().__init__(dataItem)
+        assert isinstance(dataItem, QgsLayerItem)
+        assert dataItem.mapLayerType() == QgsMapLayerType.VectorTileLayer
 
 
 class VectorDataSource(SpatialDataSource):
@@ -255,6 +287,7 @@ class RasterDataSource(SpatialDataSource):
         self.mWavelength = None
 
         self.updateNodes()
+        s = ""
 
     def updateNodes(self) -> dict:
         MD = super().updateNodes()

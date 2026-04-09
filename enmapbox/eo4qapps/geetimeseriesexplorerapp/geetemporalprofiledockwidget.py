@@ -12,6 +12,7 @@ import numpy as np
 import enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph as pg
 from enmapbox.qgispluginsupport.qps.plotstyling.plotstyling import PlotStyle, MarkerSymbol
 from enmapbox.qgispluginsupport.qps.utils import SpatialPoint
+from enmapbox.typeguard import typechecked
 from enmapbox.utils import importEarthEngine
 from enmapboxprocessing.algorithm.createspectralindicesalgorithm import CreateSpectralIndicesAlgorithm
 from geetimeseriesexplorerapp.geetimeseriesexplorerdockwidget import GeeTimeseriesExplorerDockWidget
@@ -22,6 +23,7 @@ from qgis.PyQt import QtGui
 from qgis.PyQt import uic
 from qgis.PyQt.QtCore import Qt, QDateTime, QDate, QModelIndex, QRectF, QStandardPaths, pyqtSignal, QCoreApplication
 from qgis.PyQt.QtGui import QColor, QPen, QBrush, QIcon, QPixmap
+from qgis.PyQt.QtWidgets import QDockWidget
 from qgis.PyQt.QtWidgets import (QToolButton, QListWidget, QApplication, QSpinBox,
                                  QColorDialog, QComboBox, QCheckBox, QLineEdit,
                                  QFileDialog, QListWidgetItem, QSlider, QTableWidget, QProgressBar,
@@ -31,14 +33,13 @@ from qgis.core import (
     QgsVectorLayer, QgsMapLayerProxyModel, QgsFields, QgsApplication
 )
 from qgis.gui import (
-    QgsDockWidget, QgsFeaturePickerWidget, QgsMapLayerComboBox, QgsFieldComboBox, QgsMessageBar, QgsColorButton,
+    QgsFeaturePickerWidget, QgsMapLayerComboBox, QgsFieldComboBox, QgsMessageBar, QgsColorButton,
     QgsFileWidget, QgsCheckableComboBox, QgsMapMouseEvent
 )
-from enmapbox.typeguard import typechecked
 
 
 @typechecked
-class GeeTemporalProfileDockWidget(QgsDockWidget):
+class GeeTemporalProfileDockWidget(QDockWidget):
     mMessageBar: QgsMessageBar
     mIdentify: QToolButton
     mLocation: QLineEdit
@@ -112,7 +113,7 @@ class GeeTemporalProfileDockWidget(QgsDockWidget):
     sigDataChanged = pyqtSignal()
 
     def __init__(self, mainDock: GeeTimeseriesExplorerDockWidget, parent=None):
-        QgsDockWidget.__init__(self, parent)
+        super().__init__(parent)
         uic.loadUi(__file__.replace('.py', '.ui'), self)
 
         self.mainDock = mainDock

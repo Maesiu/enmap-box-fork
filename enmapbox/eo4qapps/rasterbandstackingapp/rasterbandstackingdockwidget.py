@@ -18,15 +18,15 @@ from enmapboxprocessing.utils import Utils
 from geetimeseriesexplorerapp import MapTool
 from qgis.PyQt import uic
 from qgis.PyQt.QtCore import QEvent
-from qgis.PyQt.QtWidgets import QToolButton, QTableWidget, QRadioButton, QCheckBox
+from qgis.PyQt.QtWidgets import QToolButton, QTableWidget, QRadioButton, QCheckBox, QDockWidget
 from qgis.PyQt.QtXml import QDomDocument
 from qgis.core import QgsMimeDataUtils, QgsReadWriteContext, QgsLayerTree, QgsProject, QgsMapLayerProxyModel, \
     QgsRasterLayer
-from qgis.gui import QgsMapLayerComboBox, QgsDockWidget, QgisInterface, QgsFileWidget
+from qgis.gui import QgsMapLayerComboBox, QgisInterface, QgsFileWidget
 
 
 @typechecked
-class RasterBandStackingDockWidget(QgsDockWidget):
+class RasterBandStackingDockWidget(QDockWidget):
     mRasterTable: QTableWidget
     mAddRaster: QToolButton
     mRemoveRaster: QToolButton
@@ -45,8 +45,11 @@ class RasterBandStackingDockWidget(QgsDockWidget):
     AutomaticGridType, RasterGridType = 0, 1
 
     def __init__(self, currentLocationMapTool: Optional[MapTool], parent=None):
-        QgsDockWidget.__init__(self, parent)
+        # QgsDockWidget.__init__(self, parent)
+        super().__init__(parent)
         uic.loadUi(__file__.replace('.py', '.ui'), self)
+
+        self.mProject = QgsProject.instance()
 
         self.currentLocationMapTool = currentLocationMapTool
         self.mFile.setFilePath('bandStack.vrt')
@@ -108,6 +111,11 @@ class RasterBandStackingDockWidget(QgsDockWidget):
             return True
         return False
 
+    def setProject(self, project: QgsProject):
+
+        self.mProject = project
+        self.mGridRaster.setProject(project)
+
     def enmapBoxInterface(self) -> EnMAPBox:
         return self.interface
 
@@ -118,6 +126,7 @@ class RasterBandStackingDockWidget(QgsDockWidget):
         self.interface = interface
         if isinstance(interface, EnMAPBox):
             self.interfaceType = 0
+            self.setProject(interface.project())
         elif isinstance(interface, QgisInterface):
             self.interfaceType = 1
         else:

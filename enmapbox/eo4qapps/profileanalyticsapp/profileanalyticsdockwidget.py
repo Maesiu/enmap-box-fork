@@ -9,11 +9,11 @@ import numpy as np
 
 import enmapbox.qgispluginsupport.qps.pyqtgraph.pyqtgraph as pg
 import processing
-from enmapbox.gui.dataviews.docks import SpectralLibraryDock
 from enmapbox.gui.enmapboxgui import EnMAPBox
 from enmapbox.qgispluginsupport.qps.plotstyling.plotstyling import PlotStyleButton, PlotStyle
 from enmapbox.qgispluginsupport.qps.speclib.core.spectralprofile import prepareProfileValueDict
 from enmapbox.qgispluginsupport.qps.utils import SpatialPoint
+from enmapbox.testing import TestObjects
 from enmapbox.typeguard import typechecked, check_type
 from enmapbox.utils import findEnmapBoxGuiWidgets, findQgisGuiWidgets
 from enmapboxprocessing.algorithm.subsetrasterbandsalgorithm import SubsetRasterBandsAlgorithm
@@ -22,14 +22,14 @@ from enmapboxprocessing.utils import Utils
 from geetimeseriesexplorerapp import MapTool, GeeTimeseriesExplorerDockWidget, GeeTemporalProfileDockWidget
 from profileanalyticsapp.profileanalyticseditorwidget import ProfileAnalyticsEditorWidget
 from qgis.PyQt import uic
-from qgis.PyQt.QtWidgets import QComboBox, QTableWidget, QCheckBox, QToolButton, QLineEdit, QWidget, QLabel
+from qgis.PyQt.QtWidgets import QComboBox, QTableWidget, QCheckBox, QToolButton, QLineEdit, QWidget, QLabel, QDockWidget
 from qgis.core import QgsMapLayerProxyModel, QgsRasterLayer, QgsVectorLayer, QgsProcessingFeatureSourceDefinition, \
-    QgsFeatureRequest, QgsWkbTypes, QgsFeature
-from qgis.gui import QgsMapLayerComboBox, QgsFileWidget, QgsRasterBandComboBox, QgsDockWidget, QgisInterface
+    QgsFeatureRequest, QgsWkbTypes, QgsFeature, QgsProject, QgsProcessing
+from qgis.gui import QgsMapLayerComboBox, QgsFileWidget, QgsRasterBandComboBox, QgisInterface
 
 
 @typechecked
-class ProfileAnalyticsDockWidget(QgsDockWidget):
+class ProfileAnalyticsDockWidget(QDockWidget):
     mGraphicsLayoutWidget: pg.GraphicsLayoutWidget
 
     # data tab
@@ -59,17 +59,19 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
     NumberUnits, NanometerUnits, DecimalYearUnits = 0, 1, 2
     EnmapBoxInterface, QgisInterface = 0, 1
 
+    mLibrary: Optional[QgsVectorLayer] = None
+
     def __init__(self, currentLocationMapTool: Optional[MapTool], parent=None):
-        QgsDockWidget.__init__(self, parent)
+        super().__init__(parent)
         uic.loadUi(__file__.replace('.py', '.ui'), self)
 
         self.currentLocationMapTool = currentLocationMapTool
-        self.oldLineLayer: Optional[QgsVectorLayer] = None
+        self.oldLineLayerId: str = ''
 
         # set from outside
         self.interface = None
         self.interfaceType = None
-
+        self.mProject = QgsProject.instance()
         # connect signals
         self.mSourceType.currentIndexChanged.connect(self.onLiveUpdate)
         self.mRasterProfileType.currentIndexChanged.connect(self.onRasterProfileTypeChanged)
@@ -96,6 +98,21 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
         self.mGeeCollectionTitleLabel.setVisible(False)
         self.mGeeRasterTable.setVisible(False)
 
+    def oldLineLayerInstance(self) -> Optional[QgsVectorLayer]:
+        return self.project().mapLayer(self.oldLineLayerId)
+
+    def project(self) -> QgsProject:
+        return self.mProject
+
+    def setProject(self, project: QgsProject):
+        self.mProject = project
+
+        for r in range(self.mRasterTable.rowCount()):
+            for c in range(self.mRasterTable.columnCount()):
+                w = self.mRasterTable.cellWidget(r, c)
+                if isinstance(w, QgsMapLayerComboBox):
+                    w.setProject(project)
+
     def enmapBoxInterface(self) -> EnMAPBox:
         return self.interface
 
@@ -106,6 +123,7 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
         self.interface = interface
         if isinstance(interface, EnMAPBox):
             self.interfaceType = 0
+            self.setProject(interface.project())
         elif isinstance(interface, QgisInterface):
             self.interfaceType = 1
         else:
@@ -148,54 +166,64 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
 
         self.onLiveUpdate()
 
+    def close(self):
+
+        oLyr = self.oldLineLayerInstance()
+        if isinstance(oLyr, QgsVectorLayer):
+            oLyr.disconnect(self.onLayerSelectionChanged)
+
+        for row in reversed(range(self.mRasterTable.rowCount())):
+            self.mRasterTable.removeRow(row)
+
     def onCurrentLayerChanged(self):
-
-        # disconnect old layer
-        try:
-            self.oldLineLayer.selectionChanged.disconnect(self.onLayerSelectionChanged)
-        except Exception:
-            pass
-
-        # connect new layer
         layer = self.currentLayer()
-        if layer is None:
-            return
-        layer.selectionChanged.connect(self.onLayerSelectionChanged)
 
-        self.oldLineLayer = layer
+        if isinstance(layer, QgsVectorLayer) and layer.isValid():
+            if layer.id() != self.oldLineLayerId:
+                lyr_old = self.oldLineLayerInstance()
+                if isinstance(lyr_old, QgsVectorLayer):
+                    try:
+                        lyr_old.selectionChanged.disconnect(self.onLayerSelectionChanged)
+                    except Exception as ex:
+                        pass
+
+                layer.selectionChanged.connect(self.onLayerSelectionChanged)
+                self.oldLineLayerId = layer.id()
 
     def onLayerSelectionChanged(self):
         self.onLiveUpdate()
 
     def onAddRasterClicked(self):
+        # return
         self.mRasterTable.setRowCount(self.mRasterTable.rowCount() + 1)
         row = self.mRasterTable.rowCount() - 1
-        w = QgsMapLayerComboBox()
+        w = QgsMapLayerComboBox(parent=self.mRasterTable)
+        w.setProject(self.project())
         w.setFilters(QgsMapLayerProxyModel.RasterLayer)
         w.setAllowEmptyLayer(True)
         w.setLayer(None)
         w.layerChanged.connect(self.onLiveUpdate)
         self.mRasterTable.setCellWidget(row, 0, w)
 
-        w2 = QgsRasterBandComboBox()
+        w2 = QgsRasterBandComboBox(parent=self.mRasterTable)
         w.layerChanged.connect(w2.setLayer)
         w2.bandChanged.connect(self.onLiveUpdate)
         self.mRasterTable.setCellWidget(row, 1, w2)
 
-        w = PlotStyleButton()
+        w = PlotStyleButton(parent=self.mRasterTable)
         w.setMinimumSize(5, 5)
         w.mDialog.sigPlotStyleChanged.connect(self.onLiveUpdate)
         self.mRasterTable.setCellWidget(row, 2, w)
 
-        w = QLineEdit('0. + 1. * y')
+        w = QLineEdit('0. + 1. * y', parent=self.mRasterTable)
         w.editingFinished.connect(self.onLiveUpdate)
         self.mRasterTable.setCellWidget(row, 3, w)
 
-        w = QgsFileWidget()
+        w = QgsFileWidget(parent=self.mRasterTable)
         w.setFilter('*.py')
         w.setDefaultRoot(join(dirname(__file__), 'examples'))
         w.fileChanged.connect(self.onLiveUpdate)
-        w.dialog = None
+        # w.dialog = None
         self.mRasterTable.setCellWidget(row, 4, w)
 
         self.onLiveUpdate()
@@ -288,8 +316,14 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
         if self.interface is None:  # not yet initialized
             return
 
-        if not self.isUserVisible():
+        if not self.isVisible():
             return
+
+        if self.mLibrary is None:
+            if self.interfaceType == self.EnmapBoxInterface:
+                self.mLibrary = TestObjects.createSpectralLibrary(profile_field_names=['profiles'], wlu='nanometers')
+                self.mLibrary.setName('Profile Analytics')
+                self.enmapBoxInterface().addSources([self.mLibrary])
 
         self.mPlotWidget.clear()
 
@@ -386,7 +420,7 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                             lineLayer.source(), selectedFeaturesOnly=True, featureLimit=-1,
                             geometryCheck=QgsFeatureRequest.InvalidGeometryCheck.GeometryAbortOnInvalid),
                         'TARGET_CRS': reader.crs(),
-                        'OUTPUT': 'TEMPORARY_OUTPUT'
+                        'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
                     }
                     lineLayer2: QgsVectorLayer = processing.run(alg, parameters)['OUTPUT']
 
@@ -398,8 +432,7 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                         'DISTANCE': samplingDistance,
                         'START_OFFSET': 0,
                         'END_OFFSET': 0,
-                        # 'OUTPUT': r'C:\Users\Andreas\Downloads\points.gpkg'  # 'TEMPORARY_OUTPUT'
-                        'OUTPUT': 'TEMPORARY_OUTPUT'
+                        'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
                     }
                     pointLayer = processing.run(alg, parameters)['OUTPUT']
 
@@ -409,7 +442,7 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                     parameters = {
                         'raster': layer,
                         'bandList': [bandNo],
-                        'outputRaster': 'TEMPORARY_OUTPUT'
+                        'outputRaster': QgsProcessing.TEMPORARY_OUTPUT
                     }
                     rasterLayer = processing.run(alg, parameters)['outputRaster']
                     # b) sample values
@@ -418,8 +451,7 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                         'INPUT': pointLayer,
                         'RASTERCOPY': rasterLayer,
                         'COLUMN_PREFIX': 'SAMPLE_',
-                        'OUTPUT': 'TEMPORARY_OUTPUT'
-                        # 'OUTPUT': r'C:\Users\Andreas\Downloads\sample.gpkg' # 'TEMPORARY_OUTPUT'
+                        'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
                     }
                     pointLayer2: QgsVectorLayer = processing.run(alg, parameters)['OUTPUT']
                     xValues = [feature['distance'] for feature in pointLayer2.getFeatures()]
@@ -440,7 +472,6 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                         return
 
                     polygonId = polygonLayer.selectedFeatureIds()[0]
-                    name = f'{layer.name()} [band {bandNo}, polygon ID {polygonId}]'
 
                     # 1. extract region of interest from raster
                     alg = 'gdal:cliprasterbymasklayer'
@@ -450,8 +481,9 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                             polygonLayer.source(), selectedFeaturesOnly=True, featureLimit=-1,
                             geometryCheck=QgsFeatureRequest.InvalidGeometryCheck.GeometryAbortOnInvalid),
                         'TARGET_CRS': layer.crs(),
+                        "DATA_TYPE": 6,
                         'NODATA': np.nan,
-                        'OUTPUT': 'TEMPORARY_OUTPUT'
+                        'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
                     }
                     raster2: QgsVectorLayer = processing.run(alg, parameters)['OUTPUT']
 
@@ -490,9 +522,9 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                 style = w.plotStyle()
 
                 w: QLineEdit = self.mRasterTable.cellWidget(row, 3)
-                formular = w.text()
+                formula = w.text()
                 try:
-                    offset, tmp = formular.split('+')
+                    offset, tmp = formula.split('+')
                     scale, _ = tmp.split('*')
                     offset = float(offset)
                     scale = float(scale)
@@ -512,8 +544,9 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                         exec(code, namespace)
                         userFunction = namespace['updatePlot']
                     except Exception:
-                        pass
-                userFunctionEditor = w.dialog
+                        traceback.print_exc()
+
+                userFunctionEditor = getattr(w, 'dialog', None)
                 xValues = [float(v) for v in xValues]
                 yValues = [float(v) for v in yValues]
                 profile = Profile(xValues, yValues, xUnit, name, style)
@@ -536,9 +569,9 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                 style = w.plotStyle()
 
                 w: QLineEdit = self.mGeeRasterTable.cellWidget(row, 2)
-                formular = w.text()
+                formula = w.text()
                 try:
-                    offset, tmp = formular.split('+')
+                    offset, tmp = formula.split('+')
                     scale, _ = tmp.split('*')
                     offset = float(offset)
                     scale = float(scale)
@@ -558,7 +591,7 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                         exec(code, namespace)
                         userFunction = namespace['updatePlot']
                     except Exception:
-                        pass
+                        traceback.print_exc()
                 userFunctionEditor = w.dialog
                 xValues = [float(v) for v in xValues]
                 yValues = [float(v) for v in yValues]
@@ -598,25 +631,21 @@ class ProfileAnalyticsDockWidget(QgsDockWidget):
                     assert isinstance(dialog, ProfileAnalyticsEditorWidget)
                     dialog.mLog.setText(msg)
 
-        # link profiles into Spectral Views (see #530)
-        if self.mShowInSpectralView.isChecked():
-            for dock in self.enmapBoxInterface().docks():
-                if isinstance(dock, SpectralLibraryDock):
-                    currentProfiles = list()
-                    currentStyles = dict()
-                    allProfiles = profiles + ufuncProfiles
-                    for id, profile in enumerate(allProfiles):
-                        profileValueDict = prepareProfileValueDict(
-                            profile.xValues, profile.yValues, profile.xUnit)
-                        feature = QgsFeature()
-                        feature.setId(id)
-                        feature.setFields(dock.speclib().fields())
-                        feature.setAttribute('name', profile.name)
-                        feature.setAttribute('profiles', profileValueDict)
-                        currentStyles[(feature.id(), 'profiles')] = profile.style
-                        currentProfiles.append(feature)
-
-                    dock.speclibWidget().setCurrentProfiles(currentProfiles, None, currentStyles)
+        # add profiles to library (for potential visualization in a Spectral View)
+        if self.mLibrary is not None:
+            allProfiles = profiles + ufuncProfiles
+            self.mLibrary.dataProvider().truncate()  # delete all features
+            self.mLibrary.startEditing()
+            for id, profile in enumerate(allProfiles):
+                profileValueDict = prepareProfileValueDict(
+                    profile.xValues, profile.yValues, profile.xUnit)
+                feature = QgsFeature()
+                feature.setId(id)
+                feature.setFields(self.mLibrary.fields())
+                feature.setAttribute('name', profile.name)
+                feature.setAttribute('profiles', profileValueDict)
+                self.mLibrary.addFeatures([feature])
+            self.mLibrary.commitChanges()
 
         # set x axis title
         if self.mSourceType.currentIndex() == self.RasterLayerSource:

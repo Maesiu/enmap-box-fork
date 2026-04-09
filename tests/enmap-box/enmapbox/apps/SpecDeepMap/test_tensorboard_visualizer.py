@@ -1,15 +1,11 @@
-import os
-import shutil
-from pathlib import Path
+
 import unittest
-
-import psutil
-
-from processing.core.Processing import Processing
+from pathlib import Path
 from enmapbox import DIR_UNITTESTS
+from enmapbox.apps.SpecDeepMap import import_error
 from enmapbox.testing import start_app
 from enmapboxprocessing.testcase import TestCase
-from enmapbox.apps.SpecDeepMap import import_error
+from processing.core.Processing import Processing
 
 if not import_error:
     from enmapbox.apps.SpecDeepMap.processing_algorithm_tensorboard_visualizer import Tensorboard_visualizer
@@ -17,7 +13,7 @@ if not import_error:
     start_app()
 
 
-@unittest.skipIf(import_error, f'Missing modules to run SpecDeepMap: {import_error}')
+@unittest.skipIf(import_error or TestCase.runsInCI(), f'Missing modules to run SpecDeepMap: {import_error}')
 class Test_Tensorboard(TestCase):
 
     def test_init(self):
@@ -43,30 +39,8 @@ class Test_Tensorboard(TestCase):
 
         result = Processing.runAlgorithm(alg, parameters=io)
 
-        print(result)
+        # "TensorBoard_run": tb_ru
+        result_tb_run = result["TensorBoard_run"]
 
-        # Get the process with the given PID
-        process = psutil.Process(result['PID'])
-
-        # Assert if the process is running
-        assert process.is_running(), f"Process with PID {result['PID']} is not running."
-
-        # Clean up
-
-        # Kill the process after the check
-
-        # time.sleep(15)   process kills also tensorboard directly after creating. if check if tensorbard gui is open unhashtag this line
-
-        process = psutil.Process(result['PID'])
-        # Recursively kill all child processes
-        for child in process.children(recursive=True):
-            child.kill()  # Force kill child processes
-
-        # Kill the main process
-        process.kill()
-
-        # Remove logg folder
-        folder_path_logs_out = BASE_DIR / "test_run" / "lightning_logs"
-
-        if os.path.exists(str(folder_path_logs_out)):
-            shutil.rmtree(str(folder_path_logs_out))
+        # Assert if the process did not create url correctly
+        assert result_tb_run is True

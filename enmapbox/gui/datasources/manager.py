@@ -1,38 +1,43 @@
-import datetime
+import logging
 import os
-import pathlib
 import pickle
 import re
 import warnings
 import webbrowser
 from os.path import dirname, exists, sep
-from typing import Any, Dict, List, Union
+from pathlib import Path
+from typing import Any, Dict, List, Union, Optional
 
 import numpy as np
 
-from qgis.PyQt.QtCore import pyqtSignal, QAbstractItemModel, QFile, QFileInfo, QItemSelectionModel, QMimeData, \
-    QModelIndex, QSortFilterProxyModel, Qt, QTimer, QUrl
-from qgis.PyQt.QtGui import QContextMenuEvent, QDesktopServices
-from qgis.PyQt.QtWidgets import QAbstractItemView, QAction, QApplication, QDialog, QMenu, QTreeView, QWidget
-from qgis.core import Qgis, QgsDataItem, QgsLayerItem, QgsLayerTreeGroup, QgsLayerTreeLayer, QgsMapLayer, \
-    QgsMimeDataUtils, QgsProject, QgsProviderRegistry, QgsProviderSublayerDetails, QgsRasterDataProvider, \
-    QgsRasterLayer, QgsRasterRenderer, QgsVectorLayer
-from qgis.gui import QgisInterface, QgsDockWidget, QgsMapCanvas
 from enmapbox.gui.datasources.datasourcesets import DataSourceSet, FileDataSourceSet, ModelDataSourceSet, \
     RasterDataSourceSet, VectorDataSourceSet
 from enmapbox.gui.utils import enmapboxUiPath
 from enmapbox.qgispluginsupport.qps.layerproperties import defaultRasterRenderer
 from enmapbox.qgispluginsupport.qps.models import PyObjectTreeNode, TreeModel, TreeNode, TreeView
-from enmapbox.qgispluginsupport.qps.utils import bandClosestToWavelength, defaultBands, loadUi, qgisAppQgisInterface
+from enmapbox.qgispluginsupport.qps.utils import bandClosestToWavelength, defaultBands, loadUi
 from enmapbox.typeguard import typechecked
+from qgis.PyQt.QtCore import pyqtSignal, QAbstractItemModel, QItemSelectionModel, QMimeData, \
+    QModelIndex, QSortFilterProxyModel, Qt, QTimer, QUrl
+from qgis.PyQt.QtGui import QContextMenuEvent, QDesktopServices
+from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtWidgets import QAbstractItemView, QAction, QApplication, QDialog, QMenu, QTreeView, QWidget
+from qgis.core import Qgis, QgsDataItem, QgsLayerItem, QgsLayerTreeGroup, QgsLayerTreeLayer, QgsMapLayer, \
+    QgsMimeDataUtils, QgsProject, QgsProviderSublayerDetails, QgsRasterDataProvider, \
+    QgsRasterLayer, QgsRasterRenderer, QgsVectorLayer, QgsMapLayerType, QgsIconUtils, QgsLayerDefinition
+from qgis.core import QgsProviderRegistry
+from qgis.gui import QgisInterface, QgsDockWidget, QgsMapCanvas
 from .datasources import DataSource, FileDataSource, LayerItem, ModelDataSource, RasterDataSource, SpatialDataSource, \
-    VectorDataSource
+    VectorDataSource, VectorTileDataSource
 from .metadata import RasterBandTreeNode
 from ..dataviews.docks import Dock
 from ..mapcanvas import MapCanvas
 from ..mimedata import extractMapLayers, fromDataSourceList, MDF_URILIST, QGIS_URILIST_MIMETYPE
+from ...qgispluginsupport.qps.projectlayers import SelectProjectLayersDialog
 from ...qgispluginsupport.qps.speclib.core import is_spectral_library
-from ...qgispluginsupport.qps.subdatasets import SubDatasetSelectionDialog
+from ...qgispluginsupport.qps.subdatasets import SubDatasetSelectionDialog, subLayerDetails
+
+logger = logging.getLogger(__name__)
 
 
 class DataSourceManager(TreeModel):
@@ -49,8 +54,11 @@ class DataSourceManager(TreeModel):
         self.rootNode().appendChildNodes([self.mRasters, self.mVectors, self.mModels, self.mFiles])
         self.mProject: QgsProject = QgsProject.instance()
 
+        QgsProject.instance().layersWillBeRemoved.connect(self.onQGISLayerWillBeRemoved)
+
+        self.mNodeUpdateExceptions: List[str] = []
         self.mUpdateTimer: QTimer = QTimer()
-        self.mUpdateTimer.setInterval(500)
+        self.mUpdateTimer.setInterval(2000)
         self.mUpdateTimer.timeout.connect(self.updateSourceNodes)
         self.mUpdateTimer.start()
         self.mUpdateState: dict = dict()
@@ -67,6 +75,16 @@ class DataSourceManager(TreeModel):
     def setEnMAPBoxInstance(self, enmapbox):
         self.mEnMAPBoxInstance = enmapbox
         self.mProject = enmapbox.project()
+
+    def onQGISLayerWillBeRemoved(self, layer_ids: List[str]):
+        # remove any source that refers to the layer to be deleted soon
+        to_remove = []
+        for source in self.dataSources():
+            if isinstance(source, LayerItem) and source.layerId() in layer_ids:
+                to_remove.append(source)
+
+        if len(to_remove) > 0:
+            self.removeDataSources(to_remove)
 
     def dropMimeData(self, mimeData: QMimeData, action, row: int, column: int, parent: QModelIndex):
 
@@ -202,8 +220,9 @@ class DataSourceManager(TreeModel):
         layers = []
         for ds in self.dataSources():
             dataItem = ds.dataItem()
-            if isinstance(dataItem, LayerItem) and isinstance(dataItem.referenceLayer(), QgsMapLayer):
-                layers.append(dataItem.referenceLayer())
+            if isinstance(dataItem, LayerItem) and dataItem.hasReferenceLayer():
+                if lyr := dataItem.referenceLayer():
+                    layers.append(lyr)
         return layers
 
     def dataSources(self, filter=None) -> List[DataSource]:
@@ -245,7 +264,7 @@ class DataSourceManager(TreeModel):
                         foundSources.append(ds)
             elif isinstance(input, str):
                 for ds in allDataSources:
-                    if ds.dataItem().path() == input:
+                    if input in [ds.source(), ds.dataItem().path()]:
                         foundSources.append(ds)
 
         return foundSources
@@ -256,35 +275,57 @@ class DataSourceManager(TreeModel):
         return self.removeDataSources(*args, **kwds)
 
     def updateSourceNodes(self):
+        self.mUpdateTimer.stop()
+        try:
+            for source in self.dataSources():
+                assert isinstance(source, DataSource)
+                sid = source.source()
 
-        for source in self.dataSources():
-            assert isinstance(source, DataSource)
-            sid = id(source)
-
-            # save a state that changes with modifications, e.g. modification time
-            updateState = None
-            path = source.source()
-
-            if os.path.isfile(path):
-                info = QFileInfo(path)
-                modificationTime = info.fileTime(QFile.FileModificationTime).toString(Qt.ISODate)
-                updateState = datetime.datetime.fromisoformat(modificationTime)
-            else:
+                # save a state that changes with modifications, e.g. modification time
+                updateState = None
+                uri = source.source()
+                lyr = None
                 dataItem: QgsDataItem = source.dataItem()
-                if isinstance(dataItem, LayerItem) and isinstance(dataItem.referenceLayer(), QgsMapLayer):
-                    lyr = dataItem.referenceLayer()
-                    if isinstance(lyr, QgsVectorLayer):
-                        updateState = f'{lyr.isValid()}|{lyr.name()}|' \
-                                      f'{lyr.featureCount()}|' \
-                                      f'{lyr.geometryType()}|' \
-                                      f'{is_spectral_library(lyr)}'
 
-            oldInfo = self.mUpdateState.get(sid, None)
-            if oldInfo is None:
-                self.mUpdateState[sid] = updateState
-            elif oldInfo != updateState:
-                self.mUpdateState[sid] = updateState
-                source.updateNodes()
+                filepath = uri.split('|')[0]
+                if os.path.isfile(filepath):
+                    updateState = Path(filepath).stat().st_mtime_ns
+                else:
+                    # not a file source
+                    for lyr in self.project().mapLayers().values():
+                        if lyr.source() == uri:
+                            if isinstance(lyr, QgsVectorLayer):
+                                updateState = [lyr.isValid(), lyr.name(), lyr.featureCount(), lyr.geometryType(),
+                                               is_spectral_library(lyr)]
+                            elif isinstance(lyr, QgsRasterLayer):
+                                updateState = [lyr.bandCount(), lyr.height(), lyr.width()]
+                            else:
+                                # do not update
+                                s = ""
+
+                oldInfo = self.mUpdateState.get(sid, None)
+                if oldInfo is None:
+                    self.mUpdateState[sid] = updateState
+                    source.updateNodes()
+                elif oldInfo != updateState:
+                    self.mUpdateState[sid] = updateState
+                    if isinstance(dataItem, LayerItem):
+                        if dataItem.mapLayerType() == QgsMapLayerType.VectorLayer and isinstance(lyr, QgsVectorLayer):
+                            if updateState[-1]:
+                                # is spectral library
+                                icon = QIcon(r':/qps/ui/icons/speclib.svg')
+                            else:
+                                icon = QgsIconUtils.iconForLayer(lyr)
+                            dataItem.setIcon(icon)
+                    source.updateNodes()
+        except Exception as ex:
+            info = str(ex)
+            if info not in self.mNodeUpdateExceptions:
+                self.mNodeUpdateExceptions.append(info)
+                info += "\n This warning will not be shown again."
+                logger.error(info)
+            pass
+        self.mUpdateTimer.start()
 
     def removeDataSources(self,
                           dataSources: Union[DataSource, List[DataSource]]) -> List[DataSource]:
@@ -340,6 +381,7 @@ class DataSourceManager(TreeModel):
 
         if len(added) > 0:
             self.sigDataSourcesAdded.emit(added)
+            self.updateSourceNodes()
         return added
 
 
@@ -444,7 +486,7 @@ class DataSourceManagerTreeView(TreeView):
                   dataSource: Union[VectorDataSource, RasterDataSource, QgsMapLayer],
                   target: Union[None, QgsMapCanvas, QgsProject, Dock] = None,
                   rgb=None,
-                  sampleSize: int = None) -> QgsMapLayer:
+                  sampleSize: int = None) -> Optional[QgsMapLayer]:
         """
         Add a SpatialDataSource as QgsMapLayer to a mapCanvas.
         :param target:
@@ -459,7 +501,7 @@ class DataSourceManagerTreeView(TreeView):
 
         lyr = None
         if isinstance(dataSource, (VectorDataSource, RasterDataSource)):
-            # loads the layer with default style (wherever it is defined)
+            # loads the layer with the default style (wherever it is defined)
             lyr = dataSource.asMapLayer()
         elif isinstance(dataSource, QgsMapLayer):
             lyr = dataSource
@@ -623,7 +665,7 @@ class DataSourceManagerTreeView(TreeView):
         from enmapbox.gui.dataviews.docks import AttributeTableDock
         from enmapbox.gui.enmapboxgui import EnMAPBox
         emb = self.enmapboxInstance()
-        if isinstance(emb, EnMAPBox):
+        if isinstance(emb, EnMAPBox) and isinstance(vectorLayer, QgsVectorLayer):
             emb.dockManager().createDock(AttributeTableDock, layer=vectorLayer)
 
 
@@ -651,10 +693,13 @@ class DataSourceManagerPanelUI(QgsDockWidget):
 
         self.tbFilterText.textChanged.connect(self.setFilter)
         # self.tbFilterText.hide()  # see #167
-        hasQGIS = qgisAppQgisInterface() is not None
-        self.actionSyncWithQGIS.setEnabled(hasQGIS)
-
+        # hasQGIS = qgisAppQgisInterface() is not None
+        # self.actionSyncWithQGIS.setEnabled(hasQGIS)
+        grp = QgsProject.instance().layerTreeRoot()
+        grp.addedChildren.connect(lambda *args: self.updateActions())
+        grp.removedChildren.connect(lambda *args: self.updateActions())
         self.initActions()
+        self.updateActions()
 
     def dataSourceManagerTreeView(self) -> DataSourceManagerTreeView:
         return self.mDataSourceManagerTreeView
@@ -664,7 +709,23 @@ class DataSourceManagerPanelUI(QgsDockWidget):
 
     def onSyncToQGIS(self, *args):
         if isinstance(self.mDataSourceManager, DataSourceManager):
-            self.mDataSourceManager.importQGISLayers()
+            dialog = SelectProjectLayersDialog(project=QgsProject.instance())
+            if dialog.exec_() == QDialog.Accepted:
+                layers = dialog.selectedLayers()
+                layers = [lyr for lyr in layers if not lyr.dataProvider().name() == 'memory']
+
+                if len(layers) > 0:
+                    self.mDataSourceManager.addSources(layers)
+
+            # self.mDataSourceManager.importQGISLayers()
+
+    def updateActions(self):
+
+        from qgis.utils import iface
+        if isinstance(iface, QgisInterface):
+            model = iface.layerTreeView().layerTreeModel()
+            b = any(model.rootGroup().findLayerIds())
+            self.actionSyncWithQGIS.setEnabled(b)
 
     def initActions(self):
 
@@ -734,11 +795,11 @@ class DataSourceManagerPanelUI(QgsDockWidget):
 class DataSourceFactory(object):
 
     @staticmethod
-    def create(source: any,
+    def create(source: Any,
                name: str = None,
                show_dialogs: bool = True,
-               project: QgsProject = None,
-               parent: QWidget = None) -> List[DataSource]:
+               project: Optional[QgsProject] = None,
+               parent: Optional[QWidget] = None) -> List[DataSource]:
         """
         Searches the input for DataSources
         """
@@ -754,7 +815,7 @@ class DataSourceFactory(object):
                 return [source]
 
                 s = ""
-            dataItem: QgsDataItem = None
+            dataItem: Optional[QgsDataItem] = None
             if isinstance(source, QgsProviderSublayerDetails):
                 source = source.toMimeUri()
 
@@ -765,6 +826,10 @@ class DataSourceFactory(object):
 
                 elif source.layerType == 'vector':
                     dtype = QgsLayerItem.Vector
+                    dataItem = LayerItem(None, source.name, source.uri, source.uri, dtype, source.providerKey)
+
+                elif source.layerType == 'vector-tile':
+                    dtype = QgsLayerItem.VectorTile
                     dataItem = LayerItem(None, source.name, source.uri, source.uri, dtype, source.providerKey)
 
                 elif source.providerKey in ['special:file', 'special:pkl']:
@@ -782,30 +847,44 @@ class DataSourceFactory(object):
                 dtype = QgsLayerItem.typeFromMapLayer(source)
                 dataItem = LayerItem(None, source.name(), source.source(), source.source(), dtype,
                                      source.providerType())
+                dataItem.setIcon(QgsIconUtils.iconForLayer(source))
 
             if dataItem is None:
-                if isinstance(source, pathlib.Path):
+                if isinstance(source, Path):
                     source = source.as_posix()
                 elif isinstance(source, QUrl):
                     source = source.toString(QUrl.PreferLocalFile | QUrl.RemoveQuery)
 
                 if isinstance(source, str):
-                    lyr = QgsProject.instance().mapLayers().get(source, None)
+                    # try to find a source as layer in the current project
+                    lyr = project.mapLayers().get(source, None)
+                    if lyr is None:
+                        # backup. try to find a source as layer in a global / standard project
+                        lyr = QgsProject.instance().mapLayers().get(source, None)
+
                     if isinstance(lyr, QgsMapLayer):
                         return DataSourceFactory.create(lyr)
 
-                    source = pathlib.Path(source).as_posix()
+                    source_path = Path(source)
+                    source = source_path.as_posix()
+
+                    if source_path.suffix == '.qlr':
+                        layers = QgsLayerDefinition.loadLayerDefinitionLayers(source_path.as_posix())
+                        if len(layers) > 0:
+                            return DataSourceFactory.create(layers)
 
                     if name is None:
-                        name = pathlib.Path(source).name
+                        name = Path(source).name
 
                     if re.search(r'\.(pkl)$', source, re.I):
                         dataItem = QgsDataItem(Qgis.BrowserItemType.Custom, None, name, source, 'special:pkl')
                     else:
-                        sublayerDetails = QgsProviderRegistry.instance().querySublayers(source)
-                        if len(sublayerDetails) == 1:
-                            return DataSourceFactory.create(sublayerDetails[0])
-                        elif len(sublayerDetails) > 1:
+                        providers = ['gdal', 'ogr']
+                        providers = QgsProviderRegistry.instance().providerList()
+                        sDetails = subLayerDetails(source, providers=providers)
+                        if len(sDetails) == 1:
+                            return DataSourceFactory.create(sDetails[0])
+                        elif len(sDetails) > 1:
                             if show_dialogs:
                                 # show sublayer selection dialog
                                 d = SubDatasetSelectionDialog()
@@ -813,7 +892,7 @@ class DataSourceFactory(object):
                                 from enmapbox import icon as enmapBoxIcon
                                 d.setWindowIcon(enmapBoxIcon())
                                 d.showMultiFiles(False)
-                                d.setSubDatasetDetails(sublayerDetails)
+                                d.setSubDatasetDetails(sDetails)
                                 if d.exec_() == QDialog.Accepted:
                                     return DataSourceFactory.create(d.selectedSublayerDetails())
                                 else:
@@ -821,29 +900,40 @@ class DataSourceFactory(object):
                             else:
                                 # create a data source for each sublayer
                                 results = []
-                                for d in sublayerDetails:
+                                for d in sDetails:
                                     results.extend(DataSourceFactory.create(d))
                                 return results
 
                     if dataItem is None:
-                        if pathlib.Path(source).is_file():
+                        if Path(source).is_file():
                             dataItem = QgsDataItem(Qgis.BrowserItemType.Custom, None, name, source, 'special:file')
 
             if isinstance(dataItem, QgsDataItem):
-                ds: DataSource = None
+                ds: Optional[DataSource] = None
                 if isinstance(dataItem, LayerItem):
                     if dataItem.providerKey() in ['memory']:
+                        # get a reference to the layer
                         if isinstance(source, QgsVectorLayer):
-                            dataItem.setReferenceLayer(source)
-                        else:
-                            for lyr in project.mapLayers().values():
-                                if isinstance(lyr, QgsVectorLayer) and lyr.source() == dataItem.path():
-                                    dataItem.setReferenceLayer(lyr)
-                                    break
+                            if source.id() not in project.mapLayers():
+                                project.addMapLayer(source, False)
+                            dataItem.setReferenceLayer(source, project)
+                        elif isinstance(source, QgsMimeDataUtils.Uri):
+                            rx_uid = re.compile(r'uid={(?P<uid>[^}].*)}')
+                            if match := rx_uid.match(source.data()):
+                                layer_id = match.group('uid')
+                                for p in [project, QgsProject.instance()]:
+                                    p: QgsProject
+                                    if layer_id in p.mapLayers():
+                                        dataItem.setReferenceLayer(p.mapLayer(layer_id))
+                                        break
+
                     if dataItem.mapLayerType() == QgsMapLayer.RasterLayer:
                         ds = RasterDataSource(dataItem)
                     elif dataItem.mapLayerType() == QgsMapLayer.VectorLayer:
                         ds = VectorDataSource(dataItem)
+                    elif dataItem.mapLayerType() == QgsMapLayer.VectorTileLayer:
+                        ds = VectorTileDataSource(dataItem)
+
                 elif dataItem.providerKey() == 'special:pkl':
                     ds = ModelDataSource(dataItem)
                 elif dataItem.providerKey() == 'special:file':
@@ -868,7 +958,7 @@ class DataSourceFactory(object):
             if re.search('(HDF|SENTINEL).*:.*:.*', src):
                 src = src
             elif os.path.isfile(src):
-                src = pathlib.Path(src).as_posix()
+                src = Path(src).as_posix()
             else:
                 pass
         else:
