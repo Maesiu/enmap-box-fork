@@ -19,8 +19,6 @@ from math import pi, log
 
 import numpy as np
 from scipy.fft import fft, ifft
-import pylab
-from scipy.fft import fft, ifft
 from scipy.optimize import curve_fit
 from scipy.signal import cspline1d_eval, cspline1d
 
